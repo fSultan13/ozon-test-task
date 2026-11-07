@@ -18,6 +18,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: make check
+      - run: make test-postgres
       - run: make fuzz
       - run: make swagger
       - run: git diff --exit-code -- docs/swagger

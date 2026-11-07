@@ -33,7 +33,8 @@ if compose exec -T api-postgres wget -q -O /dev/null http://127.0.0.1:8080/ready
 fi
 response=$(compose exec -T api-postgres wget -q -O - http://127.0.0.1:8080/healthz)
 test "$response" = '{"status":"ok"}'
-compose start --wait postgres
+# Use up: older Compose v2 releases support --wait for up, but not start.
+compose --profile postgres up -d --no-deps --wait --wait-timeout 90 postgres
 response=$(compose exec -T api-postgres wget -q -O - http://127.0.0.1:8080/readyz)
 test "$response" = '{"status":"ok"}'
 container=$(compose ps -q api-postgres)

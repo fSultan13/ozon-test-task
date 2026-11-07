@@ -1,0 +1,38 @@
+basePath: /
+info:
+  contact: {}
+  description: Infrastructure scaffold. URL shortening is not implemented yet.
+  title: URL Shortener API
+  version: "0.1"
+paths:
+  /healthz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness
+  /readyz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness
+swagger: "2.0"

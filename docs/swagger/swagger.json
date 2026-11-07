@@ -1,0 +1,59 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Infrastructure scaffold. URL shortening is not implemented yet.",
+        "title": "URL Shortener API",
+        "contact": {},
+        "version": "0.1"
+    },
+    "basePath": "/",
+    "paths": {
+        "/healthz": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Liveness",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/readyz": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Readiness",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,13 @@
+.git
+.idea
+.codex
+.agents
+.env
+.env.*
+!.env.example
+bin
+coverage*
+*.test
+*.out
+AGENTS.md
+TASK.md

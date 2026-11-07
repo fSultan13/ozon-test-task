@@ -33,6 +33,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    profiles: [postgres]
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command: ["-path", "/migrations", "-database", "postgres://shortener:shortener@postgres:5432/shortener?sslmode=disable", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:17-alpine

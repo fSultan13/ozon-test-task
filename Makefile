@@ -56,3 +56,26 @@ up-postgres:
 
 down:
 	$(DOCKER) compose --profile memory --profile postgres down
+
+# Keep the generator pinned; generated files are committed.
+sqlc:
+	go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+
+# Applied separately from API startup; requires DATABASE_URL.
+migrate-up:
+	@test -n "$$DATABASE_URL" || (echo 'DATABASE_URL is required' >&2; exit 1)
+	go run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3 -path db/migrations -database "$$DATABASE_URL" up
+
+migrate-down:
+	@test -n "$$DATABASE_URL" || (echo 'DATABASE_URL is required' >&2; exit 1)
+	go run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3 -path db/migrations -database "$$DATABASE_URL" down 1
+
+test-postgres:
+	DOCKER="$(DOCKER)" sh scripts/test-postgres.sh
+
+.PHONY: sqlc migrate-up migrate-down test-postgres
+
+bench-postgres:
+	DOCKER="$(DOCKER)" sh scripts/test-postgres.sh -run='^$$' -bench=. -benchmem -count=5
+
+.PHONY: bench-postgres

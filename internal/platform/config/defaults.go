@@ -17,8 +17,9 @@ const (
 	minHTTPPort = 1
 	maxHTTPPort = 65535
 
-	defaultDatabaseMaxConns       = 10
-	defaultDatabaseConnectTimeout = 5 * time.Second
+	defaultDatabaseMaxConns         = 10
+	defaultDatabaseConnectTimeout   = 5 * time.Second
+	defaultDatabaseOperationTimeout = 3 * time.Second
 
 	defaultLogLevel = "info"
 	logFormatJSON   = "json"

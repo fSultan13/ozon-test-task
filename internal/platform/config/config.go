@@ -31,9 +31,10 @@ type HTTP struct {
 }
 
 type Database struct {
-	URL            string
-	MaxConns       int32
-	ConnectTimeout time.Duration
+	URL              string
+	MaxConns         int32
+	ConnectTimeout   time.Duration
+	OperationTimeout time.Duration
 }
 
 type Log struct {
@@ -127,10 +128,16 @@ func loadDatabase(env envLookup) (Database, error) {
 		return Database{}, err
 	}
 
+	operationTimeout, err := env.positiveDuration("DATABASE_OPERATION_TIMEOUT", defaultDatabaseOperationTimeout)
+	if err != nil {
+		return Database{}, err
+	}
+
 	return Database{
-		URL:            env.stringValue("DATABASE_URL", ""),
-		MaxConns:       int32(maxConns),
-		ConnectTimeout: connectTimeout,
+		URL:              env.stringValue("DATABASE_URL", ""),
+		MaxConns:         int32(maxConns),
+		ConnectTimeout:   connectTimeout,
+		OperationTimeout: operationTimeout,
 	}, nil
 }
 

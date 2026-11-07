@@ -1,4 +1,5 @@
 # SQL-запросы
 
-Запросы принадлежат модулю: `shortener/*.sql`. При реализации PostgreSQL-адаптера добавить `sqlc.yaml` с `sql_package: pgx/v5`, схемой из `db/migrations` и выходом в `internal/shortener/adapters/postgres/sqlc`.
-До появления схемы и запросов генерация sqlc не подключается.
+Запросы модуля — `shortener/*.sql`, схема — `db/migrations`.
+`make sqlc` генерирует pgx/v5-код в `internal/shortener/adapters/postgres/sqlc`.
+Версия генератора закреплена в Makefile; сгенерированный код не редактируется вручную.

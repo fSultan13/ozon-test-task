@@ -33,6 +33,8 @@ func TestLoad(t *testing.T) {
 		{name: "zero port", args: []string{"-http-addr=:0"}, wantErr: true},
 		{name: "empty storage", env: map[string]string{"STORAGE": ""}, wantErr: true},
 		{name: "empty timeout", env: map[string]string{"HTTP_READ_TIMEOUT": ""}, wantErr: true},
+		{name: "zero operation timeout", env: map[string]string{"DATABASE_OPERATION_TIMEOUT": "0s"}, wantErr: true},
+		{name: "invalid operation timeout", env: map[string]string{"DATABASE_OPERATION_TIMEOUT": "bad"}, wantErr: true},
 		{name: "negative database timeout", env: map[string]string{"DATABASE_CONNECT_TIMEOUT": "-1s"}, wantErr: true},
 		{name: "zero connections", env: map[string]string{"DATABASE_MAX_CONNS": "0"}, wantErr: true},
 		{name: "integer overflow", env: map[string]string{"HTTP_MAX_BODY_BYTES": "9223372036854775808"}, wantErr: true},
@@ -88,7 +90,7 @@ func TestLoadEnvironmentAndFlagOverrides(t *testing.T) {
 			ShutdownTimeout:   6 * time.Second,
 			MaxBodyBytes:      2048,
 		},
-		Database: Database{URL: "postgres://localhost/test", MaxConns: 25, ConnectTimeout: 7 * time.Second},
+		Database: Database{URL: "postgres://localhost/test", MaxConns: 25, ConnectTimeout: 7 * time.Second, OperationTimeout: 3 * time.Second},
 		Log:      Log{Level: slog.LevelDebug, Format: "text"},
 	}
 	if cfg != want {

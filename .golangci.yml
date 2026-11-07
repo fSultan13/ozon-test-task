@@ -1,0 +1,22 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - durationcheck
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - nilerr
+    - staticcheck
+    - unused
+
+formatters:
+  enable:
+    - gofmt

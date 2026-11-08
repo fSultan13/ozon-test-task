@@ -7,6 +7,9 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"ozon-test-task/internal/shortener/application"
 	"ozon-test-task/internal/shortener/domain"
@@ -128,15 +131,17 @@ func decodeRequest(body io.Reader) (ShortenRequest, error) {
 		if key != "url" || seen {
 			return ShortenRequest{}, invalid
 		}
-		value, err := decoder.Token()
-		if err != nil {
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
 			return ShortenRequest{}, err
 		}
-		text, ok := value.(string)
-		if !ok {
+		if !validUnicodeString(raw) {
 			return ShortenRequest{}, invalid
 		}
-		input.URL, seen = text, true
+		if err := json.Unmarshal(raw, &input.URL); err != nil {
+			return ShortenRequest{}, invalid
+		}
+		seen = true
 	}
 
 	token, err = decoder.Token()
@@ -155,6 +160,40 @@ func decodeRequest(body io.Reader) (ShortenRequest, error) {
 	}
 
 	return input, nil
+}
+
+// validUnicodeString checks a syntactically valid JSON value before Unmarshal
+// can silently replace invalid UTF-8 or unpaired UTF-16 surrogates with U+FFFD.
+func validUnicodeString(raw []byte) bool {
+	if len(raw) < 2 || raw[0] != '"' || !utf8.Valid(raw) {
+		return false
+	}
+	for i := 1; i < len(raw)-1; i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		i++
+		if raw[i] != 'u' {
+			continue
+		}
+		value, err := strconv.ParseUint(string(raw[i+1:i+5]), 16, 16)
+		if err != nil {
+			return false
+		}
+		i += 4
+		if !utf16.IsSurrogate(rune(value)) {
+			continue
+		}
+		if value > 0xdbff || i+6 >= len(raw) || string(raw[i+1:i+3]) != `\u` {
+			return false
+		}
+		low, err := strconv.ParseUint(string(raw[i+3:i+7]), 16, 16)
+		if err != nil || low < 0xdc00 || low > 0xdfff {
+			return false
+		}
+		i += 6
+	}
+	return true
 }
 
 func serviceError(w http.ResponseWriter, err error) {

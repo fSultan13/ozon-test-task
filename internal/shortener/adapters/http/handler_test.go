@@ -36,6 +36,11 @@ func TestShortenInvalidRequests(t *testing.T) {
 		{"missing content type", `{"url":"https://example.com"}`, "", 1024, 415},
 		{"wrong content type", `{}`, "text/plain", 1024, 415},
 		{"malformed content type", `{}`, "application/json;", 1024, 400},
+		{"invalid UTF-8", "{\"url\":\"https://example.com/\xff\"}", "application/json", 1024, 400},
+		{"unpaired high surrogate", `{"url":"https://example.com/\ud800"}`, "application/json", 1024, 400},
+		{"unpaired low surrogate", `{"url":"https://example.com/\udc00"}`, "application/json", 1024, 400},
+		{"high surrogate followed by ASCII", `{"url":"https://example.com/\ud800\u0061"}`, "application/json", 1024, 400},
+		{"high surrogate followed by escaped backslash", `{"url":"https://example.com/\ud800\\udc00"}`, "application/json", 1024, 400},
 		{"empty", "", "application/json", 1024, 400},
 		{"array", `[]`, "application/json", 1024, 400},
 		{"null", `null`, "application/json", 1024, 400},
@@ -158,4 +163,63 @@ func TestSuccessAndContext(t *testing.T) {
 	if rw.Code != 200 || rw.Header().Get("Location") != "" || !strings.Contains(rw.Body.String(), "a%2Fb?q=%2f") {
 		t.Fatalf("GET = %d %s", rw.Code, rw.Body)
 	}
+}
+
+func TestShortenPreservesUnicode(t *testing.T) {
+	for _, tt := range []struct{ name, body, want string }{
+		{"UTF-8", `{"url":"https://example.com/путь"}`, "https://example.com/путь"},
+		{"surrogate pair", `{"url":"https://example.com/\ud83d\ude00"}`, "https://example.com/😀"},
+		{"escaped backslash", `{"url":"https://example.com/?q=\\ud800"}`, `https://example.com/?q=\ud800`},
+		{"replacement character", `{"url":"https://example.com/\ufffd"}`, "https://example.com/�"},
+		{"escaped BMP character", `{"url":"https://example.com/\u043f"}`, "https://example.com/п"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			original, err := domain.NewOriginalURL(tt.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, err := domain.NewCode("Abc123_Xyz")
+			if err != nil {
+				t.Fatal(err)
+			}
+			link, err := domain.NewLink(original, code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			h := NewHandler(serviceStub{shorten: func(_ context.Context, raw string) (domain.Link, error) {
+				called = true
+				if raw != tt.want {
+					t.Fatalf("URL changed during JSON decoding: got %q, want %q", raw, tt.want)
+				}
+				return link, nil
+			}}, "https://short.example")
+			req := httptest.NewRequest(http.MethodPost, "/links", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			rw := httptest.NewRecorder()
+			h.Shorten(rw, req)
+			if rw.Code != http.StatusOK || !called {
+				t.Fatalf("POST = %d %s; service called = %v", rw.Code, rw.Body, called)
+			}
+		})
+	}
+}
+
+// Malformed request bodies must produce errors rather than panic in Unicode validation.
+func FuzzDecodeRequest(f *testing.F) {
+	for _, body := range []string{
+		`{"url":"https://example.com"}`,
+		`{"url":"https://example.com/\ud83d\ude00"}`,
+		`{"url":"https://example.com/\ud800"}`,
+		`{"url":"https://example.com/\udc00"}`,
+		`{"url":"https://example.com/\ud800\\udc00"}`,
+		`{"url":"https://example.com/\\"}`,
+		`{"url":null}`, `{"url":[]}`, `{"url":{}}`, `{"url":"\u"}`,
+		"{\"url\":\"https://example.com/\xff\"}",
+	} {
+		f.Add(body)
+	}
+	f.Fuzz(func(_ *testing.T, body string) {
+		_, _ = decodeRequest(strings.NewReader(body))
+	})
 }

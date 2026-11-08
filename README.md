@@ -130,6 +130,41 @@ db/query/shortener/              SQL-запросы для sqlc
 
 ## Проверки
 
+### Нагрузочный тест
+
+Python-утилита на Locust подключается к уже запущенному сервису. Установка и запуск из корня проекта:
+
+```sh
+python3 -m venv tools/loadtest/.venv
+tools/loadtest/.venv/bin/python -m pip install -r tools/loadtest/requirements.txt
+tools/loadtest/.venv/bin/python tools/loadtest/run.py --base-url http://localhost:8080 --label local-memory
+tools/loadtest/.venv/bin/python tools/loadtest/run.py --base-url https://short.example/api --label hosted-postgres
+```
+
+Профиль — 95% GET и 5% повторных POST. Подготовка создаёт до 100 записей по умолчанию и переиспользует их при повторных
+запусках; измеряемая фаза не добавляет новых адресов. Нужен Python 3.11+. Настройки: `--duration` (30 с),
+`--concurrency` (10 пользователей Locust), `--timeout` (3 с на I/O), `--dataset-size` (100),
+`--max-requests` (100000), `--label`. Любая ошибка означает провал; порогов RPS и задержки нет.
+
+[Краткий отчёт последнего запуска](tools/loadtest/reports/latest.md) обновляется после каждого теста; история
+сохраняется отдельными файлами. [Подробности запуска и метрик](tools/loadtest/README.md). Результат относится к
+конкретному стенду, сети и Locust-клиенту и не оценивает число пользователей.
+
+### E2E-сценарии в HTTP Client
+
+Откройте файл в GoLand / IntelliJ IDEA и выполните **Run All Requests** по порядку:
+
+- [`shortener.http`](tests/http/shortener.http) — создание и получение ссылок, повторный POST, уникальность, валидация и
+  HTTP-ошибки. Работает с memory и PostgreSQL при `HTTP_MAX_BODY_BYTES=1048576`; каждый прогон сохраняет две новые
+  связи.
+- [`memory-capacity.http`](tests/http/memory-capacity.http) — заполнение хранилища, ошибка 503 и доступность
+  существующих ссылок. Перед каждым прогоном нужен новый memory-процесс с `MEMORY_MAX_ENTRIES=1`.
+
+В файлах `baseUrl` задаёт адрес API; `e2ePublicBaseUrl` в начальном скрипте `shortener.http` должен совпадать с
+`PUBLIC_BASE_URL` без завершающего `/`. По умолчанию используется `http://localhost:8080`.
+
+### Автоматические проверки
+
 ```sh
 make check        # форматирование, vet, lint, race, checkptr, vuln, сборка
 make fmt          # форматирование gofumpt и goimports; sqlc-код исключён

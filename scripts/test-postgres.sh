@@ -9,7 +9,9 @@ trap 'exit 1' INT TERM
 
 "$DOCKER" run -d --name "$container" -e POSTGRES_PASSWORD=test -p 127.0.0.1::5432 postgres:17-alpine >/dev/null
 attempt=0
-until "$DOCKER" exec "$container" pg_isready -U postgres >/dev/null 2>&1; do
+# The image's temporary init server accepts Unix sockets only and then stops.
+# Wait for TCP so migrations run against the final PostgreSQL process.
+until "$DOCKER" exec "$container" pg_isready -h 127.0.0.1 -U postgres -d postgres -t 1 >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 30 ]; then echo 'PostgreSQL did not start' >&2; exit 1; fi
   sleep 1
@@ -27,3 +29,5 @@ if [ "$#" -eq 0 ]; then
 fi
 
 go test "$@" ./internal/shortener/adapters/postgres
+
+

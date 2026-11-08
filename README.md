@@ -24,6 +24,32 @@ git switch feat/alternative-storage-with-rom
 
 Нужен Go 1.27.3 или новее. Для контейнерного запуска — Docker с Compose v2.
 
+### Готовый образ из Docker Hub
+
+Публичный образ: [fsultan13/ozon-url-shortener](https://hub.docker.com/r/fsultan13/ozon-url-shortener).
+Поддерживает `linux/amd64` и `linux/arm64`; Docker выбирает архитектуру автоматически.
+
+```sh
+docker run --rm --name url-shortener \
+  -p 127.0.0.1:8080:8080 \
+  -e PUBLIC_BASE_URL=http://localhost:8080 \
+  fsultan13/ozon-url-shortener:latest -storage=memory
+```
+
+Проверка: `curl http://localhost:8080/readyz`. Данные memory теряются при остановке контейнера.
+Для запуска готового образа через Compose из клонированного репозитория:
+
+Compose читает настройки из `.env`. Если файла ещё нет, скопируйте `.env.example` в `.env`.
+
+```sh
+docker compose --profile memory up --no-build --pull always -d
+# Или PostgreSQL с автоматическим применением миграций:
+docker compose --profile memory --profile postgres down
+docker compose --profile postgres up --no-build --pull always -d
+```
+
+### Запуск из исходников
+
 ```sh
 export PUBLIC_BASE_URL=http://localhost:8080
 go run ./cmd/api -storage=memory
@@ -34,7 +60,6 @@ curl http://localhost:8080/readyz
 Через Docker Compose:
 
 ```sh
-export PUBLIC_BASE_URL=http://localhost:8080
 make up-memory
 make down
 make up-postgres

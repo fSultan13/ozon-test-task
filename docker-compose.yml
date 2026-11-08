@@ -1,6 +1,7 @@
 name: url-shortener
 
 x-app: &app
+  image: fsultan13/ozon-url-shortener:latest
   build: .
   init: true
   stop_grace_period: 15s

@@ -92,7 +92,7 @@ func TestLoadEnvironmentAndFlagOverrides(t *testing.T) {
 			MaxBodyBytes:      2048,
 		},
 		Database: Database{},
-		Memory:   Memory{File: "data/links.db", CacheEntries: 10000, MaxDiskBytes: 1 << 30, OperationTimeout: 3 * time.Second, BatchSize: 128, BatchDelay: time.Millisecond, MaxPendingWrites: 1024},
+		Memory:   Memory{MaxEntries: 100000},
 		Log:      Log{Level: slog.LevelDebug, Format: "text"},
 	}
 	if cfg != want {
@@ -111,7 +111,7 @@ func FuzzLoad(f *testing.F) {
 	f.Add("memory", ":8080", "10s", "10")
 	f.Add("postgres", "invalid", "-1s", "2147483648")
 	f.Fuzz(func(t *testing.T, storage, addr, timeout, conns string) {
-		env := map[string]string{"STORAGE": storage, "HTTP_ADDR": addr, "HTTP_READ_TIMEOUT": timeout, "DATABASE_MAX_CONNS": conns, "MEMORY_CACHE_ENTRIES": conns, "MEMORY_OPERATION_TIMEOUT": timeout}
+		env := map[string]string{"STORAGE": storage, "HTTP_ADDR": addr, "HTTP_READ_TIMEOUT": timeout, "DATABASE_MAX_CONNS": conns, "MEMORY_MAX_ENTRIES": conns}
 		cfg, err := load(nil, func(key string) (string, bool) { v, ok := env[key]; return v, ok })
 		if err == nil && (cfg.HTTP.ReadTimeout <= 0 || cfg.Database != (Database{}) || cfg.Storage != "memory") {
 			t.Fatal("invalid configuration accepted")

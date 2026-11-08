@@ -18,7 +18,6 @@ compose --profile memory --profile postgres config --quiet
 compose --profile memory up --build --wait --wait-timeout 90
 response=$(compose exec -T api-memory wget -q -O - http://127.0.0.1:8080/readyz)
 test "$response" = '{"status":"ok"}'
-compose exec -T api-memory test -s /app/data/links.db
 container=$(compose ps -q api-memory)
 compose stop api-memory
 test "$("$DOCKER" inspect --format '{{.State.ExitCode}}' "$container")" = 0

@@ -3,51 +3,46 @@ package memory
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"ozon-test-task/internal/shortener/domain"
 )
 
-func saveConcurrent(b *testing.B, s *Storage, links []domain.Link) {
-	b.Helper()
-	var wg sync.WaitGroup
-	for _, l := range links {
-		wg.Go(func() {
-			if got, err := s.Save(context.Background(), l); err != nil || got != l {
-				b.Errorf("save = %v, %v", got, err)
-			}
-		})
-	}
-	wg.Wait()
-}
-
 func BenchmarkStorage(b *testing.B) {
-	for _, capacity := range []int{0, 256} {
-		b.Run(fmt.Sprintf("Cache%d", capacity), func(b *testing.B) {
-			s := openStorage(b, filepath.Join(b.TempDir(), "links.db"), capacity, 16<<20)
-
-			links := make([]domain.Link, 256)
-			for i := range links {
-				links[i] = testLink(b, fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("c%d", i))
-			}
-
-			saveConcurrent(b, s, links)
-
+	const count = 10000
+	links := make([]domain.Link, count)
+	for i := range links {
+		links[i] = testLink(b, fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("%010d", i))
+	}
+	for _, mode := range []string{"ReadCode", "ReadOriginal", "SaveExisting", "Mixed95Read5Write"} {
+		b.Run(mode, func(b *testing.B) {
+			s := openStorage(b, count)
 			ctx := context.Background()
-
-			b.ResetTimer()
+			for _, l := range links {
+				if _, err := s.Save(ctx, l); err != nil {
+					b.Fatal(err)
+				}
+			}
 			b.ReportAllocs()
+			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				i := 0
 				for pb.Next() {
-					l := links[i%len(links)]
-					got, err := s.FindByCode(ctx, l.Code())
+					l := links[i%count]
+					var got domain.Link
+					var err error
+					switch {
+					case mode == "SaveExisting" || mode == "Mixed95Read5Write" && i%20 == 0:
+						got, err = s.Save(ctx, l)
+					case mode == "ReadOriginal":
+						got, err = s.FindByOriginal(ctx, l.OriginalURL())
+					default:
+						got, err = s.FindByCode(ctx, l.Code())
+					}
 					if err != nil || got != l {
-						b.Error("unexpected result")
+						b.Errorf("operation = %v, %v", got, err)
 						return
 					}
 					i++
@@ -57,34 +52,49 @@ func BenchmarkStorage(b *testing.B) {
 	}
 }
 
-// Each operation creates/closes a file and saves 32 distinct links concurrently.
-// Comparing Batch1 and Batch128 keeps durability and the workload identical.
-func BenchmarkStorageConcurrentInsertBatch(b *testing.B) {
-	links := make([]domain.Link, 32)
+// Measures batches of 1000 new associations with concurrent readers/writers.
+// Setup is excluded; map growth and allocations during insertion are included.
+func BenchmarkStorageInsert(b *testing.B) {
+	const count = 1000
+	links := make([]domain.Link, count)
 	for i := range links {
-		links[i] = testLink(b, fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("c%d", i))
+		links[i] = testLink(b, fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("%010d", i))
 	}
-
-	for _, batchSize := range []int{1, 128} {
-		b.Run(fmt.Sprintf("Batch%d", batchSize), func(b *testing.B) {
-			path := filepath.Join(b.TempDir(), "links.db")
-			options := testOptions(path, 32, 1<<20, 3*time.Second)
-			options.BatchSize = batchSize
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				s, err := NewStorage(context.Background(), options)
-				if err != nil {
-					b.Fatal(err)
+	b.ReportAllocs()
+	for range b.N {
+		b.StopTimer()
+		s, err := NewStorage(context.Background(), Options{MaxEntries: count})
+		if err != nil {
+			b.Fatal(err)
+		}
+		var next atomic.Uint64
+		b.StartTimer()
+		// A fixed worker count keeps the measured workload independent of b.N.
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				for {
+					i := next.Add(1) - 1
+					if i >= count {
+						return
+					}
+					l := links[i]
+					if _, err := s.Save(context.Background(), l); err != nil {
+						b.Error(err)
+						return
+					}
+					if _, err := s.FindByCode(context.Background(), l.Code()); err != nil {
+						b.Error(err)
+						return
+					}
 				}
-				saveConcurrent(b, s, links)
-				if err := s.Close(); err != nil {
-					b.Fatal(err)
-				}
-				if err := os.Remove(path); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
+			})
+		}
+		wg.Wait()
+		b.StopTimer()
+		if err := s.Close(); err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
 	}
 }

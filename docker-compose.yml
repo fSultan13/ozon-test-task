@@ -24,15 +24,7 @@ services:
     command: ["-storage=memory"]
     environment:
       <<: *app-env
-      MEMORY_FILE: /app/data/links.db
-      MEMORY_CACHE_ENTRIES: ${MEMORY_CACHE_ENTRIES:-10000}
-      MEMORY_MAX_DISK_BYTES: ${MEMORY_MAX_DISK_BYTES:-1073741824}
-      MEMORY_OPERATION_TIMEOUT: ${MEMORY_OPERATION_TIMEOUT:-3s}
-      MEMORY_BATCH_SIZE: ${MEMORY_BATCH_SIZE:-128}
-      MEMORY_BATCH_DELAY: ${MEMORY_BATCH_DELAY:-1ms}
-      MEMORY_MAX_PENDING_WRITES: ${MEMORY_MAX_PENDING_WRITES:-1024}
-    volumes:
-      - memory-data:/app/data
+      MEMORY_MAX_ENTRIES: ${MEMORY_MAX_ENTRIES:-100000}
 
   api-postgres:
     <<: *app
@@ -74,4 +66,3 @@ services:
 
 volumes:
   postgres-data:
-  memory-data:

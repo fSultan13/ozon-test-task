@@ -25,9 +25,7 @@ func newResources(ctx context.Context, cfg config.Config) (*resources, error) {
 	switch cfg.Storage {
 	case "memory":
 		storage, err := memory.NewStorage(ctx, memory.Options{
-			File: cfg.Memory.File, CacheEntries: cfg.Memory.CacheEntries, MaxDiskBytes: cfg.Memory.MaxDiskBytes,
-			OperationTimeout: cfg.Memory.OperationTimeout, BatchSize: cfg.Memory.BatchSize,
-			BatchDelay: cfg.Memory.BatchDelay, MaxPendingWrites: cfg.Memory.MaxPendingWrites,
+			MaxEntries: cfg.Memory.MaxEntries,
 		})
 		if err != nil {
 			return nil, err

@@ -4,13 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
-
-	bolt "go.etcd.io/bbolt"
 
 	"ozon-test-task/internal/shortener/domain"
 	"ozon-test-task/internal/shortener/ports"
@@ -33,9 +29,9 @@ func testLink(t testing.TB, original, code string) domain.Link {
 	return l
 }
 
-func openStorage(t testing.TB, path string, cache, disk int) *Storage {
+func openStorage(t testing.TB, limit int) *Storage {
 	t.Helper()
-	s, err := NewStorage(context.Background(), testOptions(path, cache, disk, time.Second))
+	s, err := NewStorage(context.Background(), Options{MaxEntries: limit})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,169 +43,101 @@ func openStorage(t testing.TB, path string, cache, disk int) *Storage {
 	return s
 }
 
-func TestStorageEvictionAndRecovery(t *testing.T) {
-	for _, capacity := range []int{0, 1, 3} {
-		t.Run(fmt.Sprint(capacity), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "links.db")
-			s := openStorage(t, path, capacity, 1<<20)
-			links := make([]domain.Link, 10)
-			ctx := context.Background()
-			for i := range links {
-				links[i] = testLink(t, fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("c%d", i))
-				if got, err := s.Save(ctx, links[i]); err != nil || got != links[i] {
-					t.Fatalf("save = %v, %v", got, err)
-				}
-			}
-			assertLinks(t, s, links)
-			if len(s.queue) > capacity || len(s.byCode) > capacity || len(s.byOriginal) > capacity {
-				t.Fatal("cache capacity exceeded")
-			}
-			duplicate := testLink(t, links[0].OriginalURL().String(), links[1].Code().String())
-			if got, err := s.Save(ctx, duplicate); err != nil || got != links[0] {
-				t.Fatalf("duplicate = %v, %v", got, err)
-			}
-			unused := testLink(t, links[0].OriginalURL().String(), "unused")
-			if got, err := s.Save(ctx, unused); err != nil || got != links[0] {
-				t.Fatalf("duplicate with unused code = %v, %v", got, err)
-			}
-			if _, err := s.FindByCode(ctx, unused.Code()); !errors.Is(err, ports.ErrNotFound) {
-				t.Fatal("duplicate created an alias")
-			}
-			conflict := testLink(t, "https://example.com/conflict", links[0].Code().String())
-			if _, err := s.Save(ctx, conflict); !errors.Is(err, ports.ErrCodeConflict) {
-				t.Fatal(err)
-			}
-			if _, err := s.FindByOriginal(ctx, conflict.OriginalURL()); !errors.Is(err, ports.ErrNotFound) {
-				t.Fatal("conflict persisted")
-			}
-			if _, err := s.Save(ctx, domain.Link{}); !errors.Is(err, domain.ErrInvalidOriginalURL) {
-				t.Fatal(err)
-			}
-			if err := s.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.FindByCode(ctx, links[0].Code()); !errors.Is(err, ErrClosed) {
-				t.Fatal(err)
-			}
-			if _, err := s.Save(ctx, links[0]); !errors.Is(err, ErrClosed) {
-				t.Fatal(err)
-			}
-			if err := s.Check(ctx); !errors.Is(err, ErrClosed) {
-				t.Fatal(err)
-			}
-			restored := openStorage(t, path, capacity, 1<<20)
-			if len(restored.queue) != 0 {
-				t.Fatal("recovery preloaded all links into RAM")
-			}
-			assertLinks(t, restored, links)
-			if err := restored.Check(ctx); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func assertLinks(t *testing.T, s *Storage, links []domain.Link) {
+func assertLink(t testing.TB, s *Storage, l domain.Link) {
 	t.Helper()
-	for _, l := range links {
-		if got, err := s.FindByCode(context.Background(), l.Code()); err != nil || got != l {
-			t.Fatalf("code = %v, %v", got, err)
-		}
-		if got, err := s.FindByOriginal(context.Background(), l.OriginalURL()); err != nil || got != l {
-			t.Fatalf("original = %v, %v", got, err)
-		}
+	if got, err := s.FindByCode(context.Background(), l.Code()); err != nil || got != l {
+		t.Errorf("find code = %v, %v", got, err)
+	}
+	if got, err := s.FindByOriginal(context.Background(), l.OriginalURL()); err != nil || got != l {
+		t.Errorf("find original = %v, %v", got, err)
 	}
 }
 
-func TestStorageDiskLimit(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "links.db")
-	s := openStorage(t, path, 1, 65536)
-	var saved []domain.Link
-	full := false
-	for i := range 1000 {
-		l := testLink(t, fmt.Sprintf("https://example.com/%0500d", i), fmt.Sprintf("c%d", i))
-		_, err := s.Save(context.Background(), l)
-		if errors.Is(err, ports.ErrCapacity) {
-			full = true
-			if _, err := s.FindByOriginal(context.Background(), l.OriginalURL()); !errors.Is(err, ports.ErrNotFound) {
-				t.Fatal("partial insert")
-			}
-			if _, err := s.FindByCode(context.Background(), l.Code()); !errors.Is(err, ports.ErrNotFound) {
-				t.Fatal("partial insert")
-			}
-			break
+func TestStorageUniquenessAndCapacity(t *testing.T) {
+	ctx := context.Background()
+	s := openStorage(t, 2)
+	a := testLink(t, "https://example.com/a", "aaaaaaaaaa")
+	b := testLink(t, "https://example.com/b", "bbbbbbbbbb")
+	c := testLink(t, "https://example.com/c", "cccccccccc")
+	if _, err := s.FindByCode(ctx, a.Code()); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatal(err)
+	}
+	if _, err := s.FindByOriginal(ctx, a.OriginalURL()); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatal(err)
+	}
+	for _, l := range []domain.Link{a, b} {
+		if got, err := s.Save(ctx, l); err != nil || got != l {
+			t.Fatalf("save = %v, %v", got, err)
 		}
-		if err != nil {
-			t.Fatal(err)
+	}
+	for _, code := range []string{b.Code().String(), c.Code().String()} {
+		duplicate := testLink(t, a.OriginalURL().String(), code)
+		if got, err := s.Save(ctx, duplicate); err != nil || got != a {
+			t.Fatalf("duplicate at capacity = %v, %v", got, err)
 		}
-		saved = append(saved, l)
 	}
-	if !full || len(saved) == 0 {
-		t.Fatal("did not exercise disk limit")
-	}
-	assertLinks(t, s, saved)
-	info, err := os.Stat(path)
-	if err != nil {
+	conflict := testLink(t, c.OriginalURL().String(), a.Code().String())
+	if _, err := s.Save(ctx, conflict); !errors.Is(err, ports.ErrCodeConflict) {
 		t.Fatal(err)
 	}
-	if info.Size() > 65536 {
-		t.Fatalf("file exceeded limit: %d", info.Size())
-	}
-	// Existing originals must remain usable even at capacity.
-	if _, err := s.Save(context.Background(), saved[0]); err != nil {
+	if _, err := s.Save(ctx, c); !errors.Is(err, ports.ErrCapacity) {
 		t.Fatal(err)
 	}
-	if err := s.Close(); err != nil {
+	if _, err := s.FindByOriginal(ctx, c.OriginalURL()); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatal("failed write created original", err)
+	}
+	if _, err := s.FindByCode(ctx, c.Code()); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatal("failed write created code", err)
+	}
+	assertLink(t, s, a)
+	assertLink(t, s, b)
+	if _, err := s.Save(ctx, domain.Link{}); !errors.Is(err, domain.ErrInvalidOriginalURL) {
 		t.Fatal(err)
 	}
-	restored := openStorage(t, path, 1, 65536)
-	assertLinks(t, restored, saved)
 }
 
 func TestStorageConcurrent(t *testing.T) {
-	for _, mode := range []string{"same original", "same code", "distinct"} {
+	for _, mode := range []string{"same original", "same code", "distinct", "capacity"} {
 		t.Run(mode, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "links.db")
-			s := openStorage(t, path, 4, 1<<20)
-			const n = 32
+			const n = 256
+			limit := n
+			if mode == "capacity" {
+				limit = 17
+			}
+			s := openStorage(t, limit)
 			links := make([]domain.Link, n)
 			for i := range links {
-				original, code := fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("c%d", i)
+				original, code := fmt.Sprintf("https://example.com/%d", i), fmt.Sprintf("%010d", i)
 				if mode == "same original" {
 					original = "https://example.com/shared"
 				}
 				if mode == "same code" {
-					code = "shared"
+					code = "sharedcode"
 				}
 				links[i] = testLink(t, original, code)
 			}
 			var wg sync.WaitGroup
-			start := make(chan struct{})
+			var successes atomic.Int64
 			results := make(chan domain.Link, n)
+			start := make(chan struct{})
 			for _, l := range links {
 				wg.Go(func() {
 					<-start
 					got, err := s.Save(context.Background(), l)
-					if errors.Is(err, ports.ErrCodeConflict) && mode == "same code" {
+					if mode == "same code" && errors.Is(err, ports.ErrCodeConflict) {
+						return
+					}
+					if mode == "capacity" && errors.Is(err, ports.ErrCapacity) {
 						return
 					}
 					if err != nil {
 						t.Error(err)
 						return
 					}
+					successes.Add(1)
 					results <- got
 					for range 5 {
-						byCode, err := s.FindByCode(context.Background(), got.Code())
-						if err != nil || byCode != got {
-							t.Errorf("read code: %v", err)
-						}
-						byOriginal, err := s.FindByOriginal(context.Background(), got.OriginalURL())
-						if err != nil || byOriginal != got {
-							t.Errorf("read original: %v", err)
-						}
+						assertLink(t, s, got)
 					}
 				})
 			}
@@ -220,33 +148,50 @@ func TestStorageConcurrent(t *testing.T) {
 			for l := range results {
 				unique[l] = true
 			}
-			want := 1
-			if mode == "distinct" {
-				want = n
+			wantUnique, wantSuccess := n, n
+			switch mode {
+			case "same original":
+				wantUnique = 1
+			case "same code":
+				wantUnique, wantSuccess = 1, 1
+			case "capacity":
+				wantUnique, wantSuccess = limit, limit
 			}
-			if len(unique) != want {
-				t.Fatalf("unique links = %d, want %d", len(unique), want)
+			if len(unique) != wantUnique || int(successes.Load()) != wantSuccess {
+				t.Fatalf("unique=%d successes=%d, want %d/%d", len(unique), successes.Load(), wantUnique, wantSuccess)
 			}
-			if len(s.queue) > s.capacity || len(s.byCode) > s.capacity || len(s.byOriginal) > s.capacity {
-				t.Fatal("cache capacity exceeded")
-			}
-			if err := s.Close(); err != nil {
-				t.Fatal(err)
-			}
-			restored := openStorage(t, path, 0, 1<<20)
-			for l := range unique {
-				assertLinks(t, restored, []domain.Link{l})
+			// After contention, verify both directions for every attempted association.
+			for _, l := range links {
+				got, err := s.FindByOriginal(context.Background(), l.OriginalURL())
+				if err == nil {
+					assertLink(t, s, got)
+				} else if !errors.Is(err, ports.ErrNotFound) {
+					t.Fatal(err)
+				}
+				got, err = s.FindByCode(context.Background(), l.Code())
+				if err == nil {
+					assertLink(t, s, got)
+				} else if !errors.Is(err, ports.ErrNotFound) {
+					t.Fatal(err)
+				}
 			}
 		})
 	}
 }
 
-func TestStorageCancellationAndFileLock(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "links.db")
-	s := openStorage(t, path, 1, 1<<20)
+func TestStorageCancellationAndClose(t *testing.T) {
+	s := openStorage(t, 1)
+	l := testLink(t, "https://example.com", "aaaaaaaaaa")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	l := testLink(t, "https://example.com", "a")
+	if _, err := NewStorage(ctx, Options{MaxEntries: 1}); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	for _, limit := range []int{0, -1} {
+		if _, err := NewStorage(context.Background(), Options{MaxEntries: limit}); err == nil {
+			t.Fatal("invalid limit accepted")
+		}
+	}
 	if _, err := s.Save(ctx, l); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
@@ -259,74 +204,39 @@ func TestStorageCancellationAndFileLock(t *testing.T) {
 	if err := s.Check(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	if _, err := NewStorage(ctx, testOptions(path, 1, 1<<20, time.Second)); !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-	// A second process/instance cannot bypass the transactional uniqueness checks.
-	if other, err := NewStorage(context.Background(), testOptions(path, 1, 1<<20, 10*time.Millisecond)); err == nil {
-		_ = other.Close()
-		t.Fatal("opened locked file")
-	}
-	// Writer admission is bounded by the caller's deadline.
-	for range cap(s.writer) {
-		s.writer <- struct{}{}
-	}
-	short, cancelShort := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancelShort()
-	if _, err := s.Save(short, l); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal(err)
-	}
-	for range cap(s.writer) {
-		<-s.writer
-	}
 	if _, err := s.FindByCode(context.Background(), l.Code()); !errors.Is(err, ports.ErrNotFound) {
-		t.Fatal("canceled insert persisted")
-	}
-}
-
-func testOptions(path string, cache, disk int, timeout time.Duration) Options {
-	return Options{File: path, CacheEntries: cache, MaxDiskBytes: disk, OperationTimeout: timeout, BatchSize: 128, BatchDelay: time.Millisecond, MaxPendingWrites: 1024}
-}
-
-func TestConcurrentWritesCommitInOneBatch(t *testing.T) {
-	const n = 16
-	options := testOptions(filepath.Join(t.TempDir(), "links.db"), n, 1<<20, 5*time.Second)
-	options.BatchSize, options.BatchDelay = n, time.Second
-	s, err := NewStorage(context.Background(), options)
-	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	var before int
-	if err := s.db.View(func(tx *bolt.Tx) error { before = tx.ID(); return nil }); err != nil {
+	if err := s.Check(context.Background()); err != nil {
 		t.Fatal(err)
-	}
-	links := make([]domain.Link, n)
-	for i := range links {
-		links[i] = testLink(t, fmt.Sprintf("https://example.com/batch/%d", i), fmt.Sprintf("b%d", i))
 	}
 	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for _, link := range links {
+	for range 32 {
 		wg.Go(func() {
-			<-start
-			if got, err := s.Save(context.Background(), link); err != nil || got != link {
-				t.Errorf("save = %v, %v", got, err)
+			_, err := s.Save(context.Background(), l)
+			if err != nil && !errors.Is(err, ErrClosed) {
+				t.Error(err)
+			}
+			_, err = s.FindByCode(context.Background(), l.Code())
+			if err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ports.ErrNotFound) {
+				t.Error(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Error(err)
 			}
 		})
 	}
-	close(start)
 	wg.Wait()
-	var after int
-	if err := s.db.View(func(tx *bolt.Tx) error { after = tx.ID(); return nil }); err != nil {
+	if _, err := s.Save(context.Background(), l); !errors.Is(err, ErrClosed) {
 		t.Fatal(err)
 	}
-	if after-before != 1 {
-		t.Fatalf("committed %d transactions for %d concurrent inserts; want 1", after-before, n)
+	if _, err := s.FindByCode(context.Background(), l.Code()); !errors.Is(err, ErrClosed) {
+		t.Fatal(err)
 	}
-	assertLinks(t, s, links)
+	if _, err := s.FindByOriginal(context.Background(), l.OriginalURL()); !errors.Is(err, ErrClosed) {
+		t.Fatal(err)
+	}
+	if err := s.Check(context.Background()); !errors.Is(err, ErrClosed) {
+		t.Fatal(err)
+	}
 }

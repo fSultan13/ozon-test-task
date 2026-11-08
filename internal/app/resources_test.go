@@ -2,12 +2,12 @@ package app
 
 import (
 	"context"
-	"ozon-test-task/internal/shortener/domain"
-	"path/filepath"
+	"errors"
 	"testing"
-	"time"
 
 	"ozon-test-task/internal/platform/config"
+	"ozon-test-task/internal/shortener/domain"
+	"ozon-test-task/internal/shortener/ports"
 )
 
 func TestResourcesRejectUnknownStorage(t *testing.T) {
@@ -16,11 +16,11 @@ func TestResourcesRejectUnknownStorage(t *testing.T) {
 	}
 }
 
-func TestMemoryResourcesRecoverWithoutPostgres(t *testing.T) {
+func TestMemoryResourcesStartEmptyWithoutPostgres(t *testing.T) {
 	cfg := config.Config{
 		Storage:  "memory",
 		Database: config.Database{URL: "invalid DSN", MaxConns: -1},
-		Memory:   config.Memory{File: filepath.Join(t.TempDir(), "links.db"), CacheEntries: 1, MaxDiskBytes: 1 << 20, OperationTimeout: time.Second, BatchSize: 128, BatchDelay: time.Millisecond, MaxPendingWrites: 1024},
+		Memory:   config.Memory{MaxEntries: 1},
 	}
 
 	r, err := newResources(context.Background(), cfg)
@@ -75,7 +75,7 @@ func TestMemoryResourcesRecoverWithoutPostgres(t *testing.T) {
 		}
 	}()
 
-	if got, err := restored.storage.FindByCode(context.Background(), code); err != nil || got != link {
-		t.Fatalf("restored link = %v, %v", got, err)
+	if _, err := restored.storage.FindByCode(context.Background(), code); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("fresh storage lookup = %v", err)
 	}
 }

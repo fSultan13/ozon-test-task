@@ -44,13 +44,7 @@ type Log struct {
 }
 
 type Memory struct {
-	File             string
-	CacheEntries     int
-	MaxDiskBytes     int
-	OperationTimeout time.Duration
-	BatchSize        int
-	BatchDelay       time.Duration
-	MaxPendingWrites int
+	MaxEntries int
 }
 
 // Load applies flags over environment variables over defaults. It does not load .env files.

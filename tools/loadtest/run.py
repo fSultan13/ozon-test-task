@@ -204,7 +204,7 @@ class Result:
         return self.reason in ("duration", "max_requests") and self.total > 0 and not self.failures
 
 
-def experiment(config, stop):
+def experiment(config, stop, observe=None):
     result = Result()
     dataset = []
     client = Client(config)
@@ -278,6 +278,8 @@ def experiment(config, stop):
         gate.set()
         while runner.user_count:
             gevent.sleep(0.01)
+            if observe is not None:
+                observe(result)
         result.reason = ("worker_failed" if worker_failed else "interrupted" if stop.is_set() else
                          "max_requests" if next_index >= config.max_requests else "duration")
     finally:

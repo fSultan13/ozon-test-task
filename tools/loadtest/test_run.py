@@ -215,5 +215,23 @@ class LoadTest(unittest.TestCase):
                     process.communicate()
 
 
+class ObserverTest(unittest.TestCase):
+    def test_observer_can_stop_in_flight_experiment(self):
+        with server() as instance:
+            config = run.arguments(["--base-url", f"http://127.0.0.1:{instance.server_port}",
+                                    "--dataset-size", "1", "--duration", "30", "--concurrency", "2"])
+            stop = threading.Event()
+
+            def observe(result):
+                if result.total:
+                    stop.set()
+
+            result = run.experiment(config, stop, observe)
+            self.assertEqual(result.reason, "interrupted")
+            self.assertGreater(result.total, 0)
+            self.assertEqual(result.failures, 0)
+            self.assertLess(result.elapsed, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -192,6 +192,14 @@ tools/loadtest/.venv/bin/python tools/loadtest/run.py --base-url https://short.e
 сохраняется отдельными файлами. [Подробности запуска и метрик](tools/loadtest/README.md). Результат относится к
 конкретному стенду, сети и Locust-клиенту и не оценивает число пользователей.
 
+Отчёты нагрузочных тестов двух стендов на VPS от 8 ноября 2026 года:
+
+- [Memory — 168.113.172.116:18080](tools/loadtest/reports/2026-11-08-vps-memory.md).
+- [PostgreSQL — 168.113.172.116:18081](tools/loadtest/reports/2026-11-08-vps-postgres.md).
+
+Оба теста запускаются последовательно с одинаковыми параметрами: 30 секунд, 10 пользователей Locust,
+100 подготовленных ссылок, 95% GET и 5% повторных POST, таймаут I/O 3 секунды, лимит 100 000 запросов.
+
 ### E2E-сценарии в HTTP Client
 
 Откройте файл в GoLand / IntelliJ IDEA и выполните **Run All Requests** по порядку:

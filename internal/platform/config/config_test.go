@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,8 +25,8 @@ func TestLoad(t *testing.T) {
 		{name: "invalid timeout", env: map[string]string{"HTTP_READ_TIMEOUT": "bad"}, wantErr: true},
 		{name: "zero timeout", env: map[string]string{"HTTP_WRITE_TIMEOUT": "0s"}, wantErr: true},
 		{name: "negative limit", env: map[string]string{"HTTP_MAX_BODY_BYTES": "-1"}, wantErr: true},
-		{name: "connection overflow", env: map[string]string{"DATABASE_MAX_CONNS": "2147483648"}, wantErr: true},
-		{name: "invalid integer", env: map[string]string{"DATABASE_MAX_CONNS": "abc"}, wantErr: true},
+		{name: "connection overflow", args: []string{"-storage=postgres"}, env: map[string]string{"DATABASE_MAX_CONNS": "2147483648"}, wantErr: true},
+		{name: "invalid integer", args: []string{"-storage=postgres"}, env: map[string]string{"DATABASE_MAX_CONNS": "abc"}, wantErr: true},
 		{name: "invalid log format", env: map[string]string{"LOG_FORMAT": "xml"}, wantErr: true},
 		{name: "invalid log level", env: map[string]string{"LOG_LEVEL": "abc"}, wantErr: true},
 		{name: "invalid address", args: []string{"-http-addr=localhost"}, wantErr: true},
@@ -33,10 +34,10 @@ func TestLoad(t *testing.T) {
 		{name: "zero port", args: []string{"-http-addr=:0"}, wantErr: true},
 		{name: "empty storage", env: map[string]string{"STORAGE": ""}, wantErr: true},
 		{name: "empty timeout", env: map[string]string{"HTTP_READ_TIMEOUT": ""}, wantErr: true},
-		{name: "zero operation timeout", env: map[string]string{"DATABASE_OPERATION_TIMEOUT": "0s"}, wantErr: true},
-		{name: "invalid operation timeout", env: map[string]string{"DATABASE_OPERATION_TIMEOUT": "bad"}, wantErr: true},
-		{name: "negative database timeout", env: map[string]string{"DATABASE_CONNECT_TIMEOUT": "-1s"}, wantErr: true},
-		{name: "zero connections", env: map[string]string{"DATABASE_MAX_CONNS": "0"}, wantErr: true},
+		{name: "zero operation timeout", args: []string{"-storage=postgres"}, env: map[string]string{"DATABASE_OPERATION_TIMEOUT": "0s"}, wantErr: true},
+		{name: "invalid operation timeout", args: []string{"-storage=postgres"}, env: map[string]string{"DATABASE_OPERATION_TIMEOUT": "bad"}, wantErr: true},
+		{name: "negative database timeout", args: []string{"-storage=postgres"}, env: map[string]string{"DATABASE_CONNECT_TIMEOUT": "-1s"}, wantErr: true},
+		{name: "zero connections", args: []string{"-storage=postgres"}, env: map[string]string{"DATABASE_MAX_CONNS": "0"}, wantErr: true},
 		{name: "integer overflow", env: map[string]string{"HTTP_MAX_BODY_BYTES": "9223372036854775808"}, wantErr: true},
 		{name: "maximum port", args: []string{"-http-addr=:65535"}, wantStorage: "memory"},
 		{name: "maximum connections", env: map[string]string{"DATABASE_MAX_CONNS": "2147483647"}, wantStorage: "memory"},
@@ -90,7 +91,8 @@ func TestLoadEnvironmentAndFlagOverrides(t *testing.T) {
 			ShutdownTimeout:   6 * time.Second,
 			MaxBodyBytes:      2048,
 		},
-		Database: Database{URL: "postgres://localhost/test", MaxConns: 25, ConnectTimeout: 7 * time.Second, OperationTimeout: 3 * time.Second},
+		Database: Database{},
+		Memory:   Memory{File: "data/links.db", CacheEntries: 10000, MaxDiskBytes: 1 << 30, OperationTimeout: 3 * time.Second, BatchSize: 128, BatchDelay: time.Millisecond, MaxPendingWrites: 1024},
 		Log:      Log{Level: slog.LevelDebug, Format: "text"},
 	}
 	if cfg != want {
@@ -109,10 +111,44 @@ func FuzzLoad(f *testing.F) {
 	f.Add("memory", ":8080", "10s", "10")
 	f.Add("postgres", "invalid", "-1s", "2147483648")
 	f.Fuzz(func(t *testing.T, storage, addr, timeout, conns string) {
-		env := map[string]string{"STORAGE": storage, "HTTP_ADDR": addr, "HTTP_READ_TIMEOUT": timeout, "DATABASE_MAX_CONNS": conns}
+		env := map[string]string{"STORAGE": storage, "HTTP_ADDR": addr, "HTTP_READ_TIMEOUT": timeout, "DATABASE_MAX_CONNS": conns, "MEMORY_CACHE_ENTRIES": conns, "MEMORY_OPERATION_TIMEOUT": timeout}
 		cfg, err := load(nil, func(key string) (string, bool) { v, ok := env[key]; return v, ok })
-		if err == nil && (cfg.HTTP.ReadTimeout <= 0 || cfg.Database.MaxConns <= 0 || cfg.Storage != "memory") {
+		if err == nil && (cfg.HTTP.ReadTimeout <= 0 || cfg.Database != (Database{}) || cfg.Storage != "memory") {
 			t.Fatal("invalid configuration accepted")
 		}
 	})
+}
+
+func TestMemoryDoesNotReadDatabaseConfiguration(t *testing.T) {
+	for _, args := range [][]string{nil, {"-storage=memory"}} {
+		cfg, err := load(args, func(key string) (string, bool) {
+			if key == "STORAGE" && args != nil {
+				return "postgres", true
+			}
+			if strings.HasPrefix(key, "DATABASE_") {
+				t.Fatalf("memory mode read %s", key)
+			}
+			return "", false
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Database != (Database{}) {
+			t.Fatal("database configured in memory mode")
+		}
+	}
+}
+
+func TestPostgresFlagLoadsDatabaseConfiguration(t *testing.T) {
+	cfg, err := load([]string{"-storage=postgres"}, func(key string) (string, bool) {
+		values := map[string]string{"STORAGE": "memory", "DATABASE_URL": "postgres://localhost/test", "DATABASE_MAX_CONNS": "25"}
+		v, ok := values[key]
+		return v, ok
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.MaxConns != 25 || cfg.Database.OperationTimeout <= 0 {
+		t.Fatal("missing postgres configuration")
+	}
 }

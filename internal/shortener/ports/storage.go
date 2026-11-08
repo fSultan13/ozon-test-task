@@ -10,6 +10,7 @@ import (
 var (
 	ErrNotFound     = errors.New("link not found")
 	ErrCodeConflict = errors.New("code already belongs to another URL")
+	ErrCapacity     = errors.New("storage capacity reached")
 )
 
 // Storage implementations must support concurrent calls, honor context and

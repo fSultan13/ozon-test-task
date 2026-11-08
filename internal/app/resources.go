@@ -8,6 +8,7 @@ import (
 
 	"ozon-test-task/internal/platform/config"
 	"ozon-test-task/internal/platform/postgres"
+	"ozon-test-task/internal/shortener/adapters/memory"
 	shortenerpostgres "ozon-test-task/internal/shortener/adapters/postgres"
 	"ozon-test-task/internal/shortener/ports"
 )
@@ -16,11 +17,23 @@ import (
 type resources struct {
 	postgres *pgxpool.Pool
 	storage  ports.Storage
+	memory   *memory.Storage
 }
 
 func newResources(ctx context.Context, cfg config.Config) (*resources, error) {
 	r := &resources{}
-	if cfg.Storage == "postgres" {
+	switch cfg.Storage {
+	case "memory":
+		storage, err := memory.NewStorage(ctx, memory.Options{
+			File: cfg.Memory.File, CacheEntries: cfg.Memory.CacheEntries, MaxDiskBytes: cfg.Memory.MaxDiskBytes,
+			OperationTimeout: cfg.Memory.OperationTimeout, BatchSize: cfg.Memory.BatchSize,
+			BatchDelay: cfg.Memory.BatchDelay, MaxPendingWrites: cfg.Memory.MaxPendingWrites,
+		})
+		if err != nil {
+			return nil, err
+		}
+		r.memory, r.storage = storage, storage
+	case "postgres":
 		pool, err := postgres.NewPool(ctx, cfg.Database)
 		if err != nil {
 			return nil, err
@@ -31,19 +44,28 @@ func newResources(ctx context.Context, cfg config.Config) (*resources, error) {
 			pool.Close()
 			return nil, fmt.Errorf("create shortener storage: %w", err)
 		}
+	default:
+		return nil, fmt.Errorf("unsupported storage mode")
 	}
 	return r, nil
 }
 
 func (r *resources) Check(ctx context.Context) error {
+	if r.memory != nil {
+		return r.memory.Check(ctx)
+	}
 	if r.postgres == nil {
 		return nil
 	}
 	return r.postgres.Ping(ctx)
 }
 
-func (r *resources) Close() {
+func (r *resources) Close() error {
 	if r.postgres != nil {
 		r.postgres.Close()
 	}
+	if r.memory != nil {
+		return r.memory.Close()
+	}
+	return nil
 }

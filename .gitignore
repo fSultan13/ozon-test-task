@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 /bin/
+/data/
 /coverage*
 *.test
 *.out

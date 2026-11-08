@@ -43,6 +43,12 @@ profile:
 	mkdir -p bin
 	go test ./internal/transport/http/middleware -run='^$$' -bench=BenchmarkWrap -benchmem -cpuprofile=bin/cpu.pprof -memprofile=bin/mem.pprof -o bin/middleware.test
 
+profile-memory:
+	mkdir -p bin
+	go test ./internal/shortener/adapters/memory -run='^$$' -bench=BenchmarkStorage -benchmem -cpuprofile=bin/memory-cpu.pprof -memprofile=bin/memory-heap.pprof -o bin/memory.test
+
+.PHONY: profile-memory
+
 check: fmt-check vet lint test checkptr vuln build
 
 swagger:

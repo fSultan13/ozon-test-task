@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -11,13 +12,13 @@ import (
 )
 
 // Run owns runtime resources and blocks until cancellation or a server failure.
-func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
+func Run(ctx context.Context, cfg config.Config, log *slog.Logger) (runErr error) {
 	resources, err := newResources(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	// Keep the database available until HTTP shutdown has completed.
-	defer resources.Close()
+	defer func() { runErr = errors.Join(runErr, resources.Close()) }()
 
 	router := httptransport.NewRouter(log, resources.Check, cfg.HTTP.MaxBodyBytes)
 	server := newHTTPServer(cfg.HTTP, router, log)

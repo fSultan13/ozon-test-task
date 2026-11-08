@@ -17,6 +17,7 @@ type Config struct {
 	Storage  string
 	HTTP     HTTP
 	Database Database
+	Memory   Memory
 	Log      Log
 }
 
@@ -42,6 +43,16 @@ type Log struct {
 	Format string
 }
 
+type Memory struct {
+	File             string
+	CacheEntries     int
+	MaxDiskBytes     int
+	OperationTimeout time.Duration
+	BatchSize        int
+	BatchDelay       time.Duration
+	MaxPendingWrites int
+}
+
 // Load applies flags over environment variables over defaults. It does not load .env files.
 func Load(args []string) (Config, error) {
 	return load(args, os.LookupEnv)
@@ -53,25 +64,32 @@ func load(args []string, env envLookup) (Config, error) {
 		return Config{}, err
 	}
 
-	databaseConfig, err := loadDatabase(env)
-	if err != nil {
-		return Config{}, err
-	}
-
 	logConfig, err := loadLog(env)
 	if err != nil {
 		return Config{}, err
 	}
 
 	cfg := Config{
-		Storage:  env.stringValue("STORAGE", storageMemory),
-		HTTP:     httpConfig,
-		Database: databaseConfig,
-		Log:      logConfig,
+		Storage: env.stringValue("STORAGE", storageMemory),
+		HTTP:    httpConfig,
+		Log:     logConfig,
 	}
 
 	if err := applyFlags(args, &cfg); err != nil {
 		return Config{}, err
+	}
+	// Resolve flag precedence before reading any PostgreSQL configuration.
+	if cfg.Storage == storagePostgres {
+		cfg.Database, err = loadDatabase(env)
+		if err != nil {
+			return Config{}, err
+		}
+	}
+	if cfg.Storage == storageMemory {
+		cfg.Memory, err = loadMemory(env)
+		if err != nil {
+			return Config{}, err
+		}
 	}
 	if err := cfg.validate(); err != nil {
 		return Config{}, err

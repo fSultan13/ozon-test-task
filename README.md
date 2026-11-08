@@ -1,8 +1,8 @@
 # URL Shortener
 
-Go-сервис для [тестового задания](TASK.md). Реализованы домен, application, генератор кодов и PostgreSQL-адаптер. HTTP
-API сокращения ссылок и memory-адаптер пока не реализованы. В режиме PostgreSQL адаптер хранения собирается в `app`.
-Доступны `GET /healthz` и `GET /readyz`; в режиме PostgreSQL readiness проверяет соединение с БД.
+Go-сервис для [тестового задания](TASK.md). Реализованы домен, application, генератор кодов, memory- и
+PostgreSQL-адаптеры. HTTP API сокращения ссылок пока не реализовано. Адаптер хранения выбирается в `app`. Доступны
+`GET /healthz` и `GET /readyz`; в режиме PostgreSQL readiness проверяет соединение с БД.
 
 ## Запуск
 
@@ -23,7 +23,7 @@ make up-postgres
 make down
 ```
 
-Профили запускаются по очереди: оба используют порт 8080. `make down` сохраняет данные PostgreSQL. Для внешней БД
+Профили запускаются по очереди: оба используют порт 8080. `make down` сохраняет тома memory и PostgreSQL. Для внешней БД
 сначала примените миграции:
 
 ```sh
@@ -63,6 +63,7 @@ internal/shortener/
   ports/                        контракты хранения и генерации
   application/                  Shorten и Resolve
   adapters/random/              генератор кодов
+  adapters/memory/              ограниченный кеш RAM и дисковые индексы bbolt
   adapters/postgres/            адаптер Storage и сгенерированный sqlc-код
 db/migrations/                  миграции golang-migrate
 db/query/shortener/              SQL-запросы для sqlc
@@ -73,14 +74,44 @@ db/query/shortener/              SQL-запросы для sqlc
 ```sh
 make check        # форматирование, vet, lint, race, checkptr, vuln, сборка
 make fuzz         # fuzzing конфигурации
-make bench        # валидация URL, генератор и middleware, время и аллокации
+make bench        # memory storage, валидация URL, генератор и middleware, время и аллокации
 make profile      # CPU/heap-профили middleware в bin/
-make test-docker  # проверка обоих Compose-профилей и запуска миграций
+make profile-memory # CPU/heap-профили memory-адаптера в bin/
+make test-docker  # проверка двух Compose-профилей, перезапуска memory и миграций
 make test-postgres # изолированная PostgreSQL 17: up/down/up, интеграционные тесты с race
 make bench-postgres # параллельные resolve/save-existing с настоящей БД
 make sqlc         # генерация SQL-кода, sqlc v1.30.0
 make swagger      # спецификация из аннотаций работающих обработчиков
 ```
+
+## Memory: RAM и постоянный файл
+
+`-storage=memory` хранит данные в файле bbolt и использует ограниченный RAM-кеш для быстрого чтения. PostgreSQL не
+настраивается и не запускается.
+
+Настройки по умолчанию:
+
+```sh
+MEMORY_FILE=data/links.db \
+MEMORY_CACHE_ENTRIES=10000 \
+MEMORY_MAX_DISK_BYTES=1073741824 \
+MEMORY_OPERATION_TIMEOUT=3s \
+MEMORY_BATCH_SIZE=128 \
+MEMORY_BATCH_DELAY=1ms \
+MEMORY_MAX_PENDING_WRITES=1024 \
+go run ./cmd/api -storage=memory
+```
+
+- Кеш потокобезопасен: два `map` защищены `sync.RWMutex`. При заполнении FIFO вытесняет записи только из RAM.
+- Конкурентные вставки объединяются в пачки. `Save` возвращает успех после сохранения на диск; уникальность URL и кода
+  обеспечивается транзакцией.
+- Размер кеша, файла и число ожидающих записей ограничены настройками. При заполнении файла новые ссылки отклоняются с
+  `ports.ErrCapacity`, существующие остаются доступны.
+- При остановке файл синхронизируется и закрывается. После перезапуска данные доступны, кеш заполняется по запросам.
+- В Docker данные находятся в томе `memory-data`; `make down` его сохраняет.
+
+В локальном бенчмарке 32 конкурентные вставки с пакетной записью выполнялись примерно в 9 раз быстрее: 29–31 мс против
+272–280 мс. Это замер хранения, не HTTP RPS.
 
 ## PostgreSQL
 

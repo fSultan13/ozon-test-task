@@ -1,0 +1,74 @@
+# Run separately against a FRESH memory process with MEMORY_MAX_ENTRIES=1.
+# Do not run shortener.http against this process first. Run All Requests in order.
+@baseUrl = http://localhost:8080
+
+### Fill the only available slot
+< {%
+    client.global.clear("capacityCode");
+    client.global.clear("capacityShortUrl");
+    client.global.set("capacityOriginal", "https://example.com/capacity/" + Date.now() + "-" + Math.random().toString(36).slice(2));
+%}
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"{{capacityOriginal}}"}
+
+> {%
+    client.test("First URL fills the available slot", function () {
+        client.assert(response.status === 200, "Expected 200; start a fresh memory process with MEMORY_MAX_ENTRIES=1");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(typeof response.body.short_url === "string", "Missing short URL");
+        const code = response.body.short_url.split("/").pop();
+        client.assert(/^[a-zA-Z0-9_]{10}$/.test(code), "Invalid generated code");
+        client.global.set("capacityCode", code);
+        client.global.set("capacityShortUrl", response.body.short_url);
+    });
+%}
+
+### New URL is rejected once storage is full
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"{{capacityOriginal}}/other"}
+
+> {%
+    client.test("Full storage returns a generic 503 error", function () {
+        client.assert(response.status === 503, "Expected 503");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "service_unavailable" && response.body.message === "Service unavailable", "Unexpected error body");
+    });
+%}
+
+### Existing URL remains idempotent even when storage is full
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"{{capacityOriginal}}"}
+
+> {%
+    client.test("Existing URL does not consume another slot", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.body.short_url === client.global.get("capacityShortUrl"), "Stored short URL changed");
+    });
+%}
+
+### Existing association is still readable
+GET {{baseUrl}}/links/{{capacityCode}}
+
+> {%
+    client.test("Capacity error preserves stored data", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.body.url === client.global.get("capacityOriginal"), "Stored URL changed");
+    });
+%}
+
+### Exhausting memory capacity does not make infrastructure unready
+GET {{baseUrl}}/readyz
+
+> {%
+    client.test("Full memory storage remains ready", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.body.status === "ok", "Expected ok");
+    });
+%}

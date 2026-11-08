@@ -1,0 +1,459 @@
+# JetBrains HTTP Client (GoLand / IntelliJ IDEA): Run All Requests in order.
+# Start the API with PUBLIC_BASE_URL=http://localhost:8080 and default body limit.
+# baseUrl is the API address; e2ePublicBaseUrl below must match PUBLIC_BASE_URL.
+@baseUrl = http://localhost:8080
+
+### Liveness and initialize this run (do not reuse globals from a previous run)
+< {%
+    client.global.clear("e2eCode");
+    client.global.clear("e2eShortUrl");
+    client.global.set("e2ePublicBaseUrl", "http://localhost:8080");
+    client.global.set("e2eOriginal", "https://example.com/a%2Fb?run=" + Date.now() + "-" + Math.random().toString(36).slice(2) + "&q=%2f#Fragment");
+%}
+GET {{baseUrl}}/healthz
+
+> {%
+    client.test("API is alive", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(response.body.status === "ok", "Expected ok");
+    });
+%}
+
+### Readiness (checks the database in PostgreSQL mode)
+GET {{baseUrl}}/readyz
+
+> {%
+    client.test("Storage is ready", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(response.body.status === "ok", "Expected ok");
+    });
+%}
+
+### Create a short link; untrusted headers must not affect its public address
+POST {{baseUrl}}/links
+Content-Type: application/json; charset=utf-8
+Forwarded: host=attacker.example;proto=https
+X-Forwarded-Host: attacker.example
+X-Forwarded-Proto: https
+
+{"url":"{{e2eOriginal}}"}
+
+> {%
+    client.test("Short URL uses the configured base and a 10-character code", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).join() === "short_url", "Unexpected response fields");
+        const prefix = client.global.get("e2ePublicBaseUrl") + "/links/";
+        const shortUrl = response.body.short_url;
+        client.assert(typeof shortUrl === "string" && shortUrl.startsWith(prefix), "Unexpected public base URL");
+        const code = shortUrl.slice(prefix.length);
+        client.assert(/^[a-zA-Z0-9_]{10}$/.test(code), "Invalid generated code");
+        client.global.set("e2eCode", code);
+        client.global.set("e2eShortUrl", shortUrl);
+    });
+%}
+
+### Resolve via the API address (also works when PUBLIC_BASE_URL is external)
+# @no-redirect
+GET {{baseUrl}}/links/{{e2eCode}}
+
+> {%
+    client.test("GET returns the exact original URL as JSON without redirecting", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(!response.headers.valueOf("Location"), "Unexpected redirect header");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).join() === "url", "Unexpected response fields");
+        client.assert(response.body.url === client.global.get("e2eOriginal"), "Original URL was changed");
+    });
+%}
+
+### Submitting the same original URL must return the same short URL
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"{{e2eOriginal}}"}
+
+> {%
+    client.test("Repeated POST is idempotent", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.body.short_url === client.global.get("e2eShortUrl"), "Duplicate URL received another code");
+    });
+%}
+
+### A distinct original URL must receive a distinct code
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"{{e2eOriginal}}-different"}
+
+> {%
+    client.test("Different URLs have different codes", function () {
+        client.assert(response.status === 200, "Expected 200");
+        const prefix = client.global.get("e2ePublicBaseUrl") + "/links/";
+        client.assert(typeof response.body.short_url === "string" && response.body.short_url.startsWith(prefix), "Unexpected public base URL");
+        const code = response.body.short_url.slice(prefix.length);
+        client.assert(/^[a-zA-Z0-9_]{10}$/.test(code), "Invalid generated code");
+        client.assert(response.body.short_url !== client.global.get("e2eShortUrl"), "Code was reused for another URL");
+        client.global.set("e2eOtherCode", code);
+    });
+%}
+
+### Resolve the second link to check that the stored associations did not mix
+GET {{baseUrl}}/links/{{e2eOtherCode}}
+
+> {%
+    client.test("Second code resolves to the second URL", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.body.url === client.global.get("e2eOriginal") + "-different", "Wrong stored association");
+    });
+%}
+
+### A valid one-character code cannot be generated by the current generator
+GET {{baseUrl}}/links/_
+
+> {%
+    client.test("Unknown valid code returns the documented error", function () {
+        client.assert(response.status === 404, "Expected 404");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(JSON.stringify(response.body) === JSON.stringify({code: "not_found", message: "Link not found"}), "Unexpected error body");
+    });
+%}
+
+### Invalid code alphabet
+GET {{baseUrl}}/links/bad-code
+
+> {%
+    client.test("Invalid code is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Code longer than ten characters
+GET {{baseUrl}}/links/abcdefghijk
+
+> {%
+    client.test("Overlong code is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Relative URL
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"/relative"}
+
+> {%
+    client.test("Relative URL is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Unsupported URL scheme
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"ftp://example.com/file"}
+
+> {%
+    client.test("Unsupported URL scheme is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### URL without a host
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"https:///path"}
+
+> {%
+    client.test("URL without a host is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Unescaped whitespace in URL
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"https://example.com/a b"}
+
+> {%
+    client.test("Unescaped whitespace in URL is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Invalid percent encoding
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"https://example.com/?q=%ZZ"}
+
+> {%
+    client.test("Invalid percent encoding is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Missing url field
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{}
+
+> {%
+    client.test("Missing url field is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Empty URL
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":""}
+
+> {%
+    client.test("Empty URL is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Non-string URL
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":null}
+
+> {%
+    client.test("Non-string URL is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Unknown JSON field
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"https://example.com","extra":true}
+
+> {%
+    client.test("Unknown JSON field is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Duplicate url field
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"https://example.com/a","url":"https://example.com/b"}
+
+> {%
+    client.test("Duplicate url field is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Case-sensitive field name
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"URL":"https://example.com"}
+
+> {%
+    client.test("Case-sensitive field name is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Multiple JSON values
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":"https://example.com"} {}
+
+> {%
+    client.test("Multiple JSON values is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### JSON array instead of an object
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+["https://example.com"]
+
+> {%
+    client.test("JSON array instead of an object is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Malformed JSON
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{"url":
+
+> {%
+    client.test("Malformed JSON is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Empty request body
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+
+
+> {%
+    client.test("Empty request body is rejected", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Unsupported content type
+POST {{baseUrl}}/links
+Content-Type: text/plain
+
+{"url":"https://example.com"}
+
+> {%
+    client.test("Unsupported content type is rejected", function () {
+        client.assert(response.status === 415, "Expected 415");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "unsupported_media_type" && response.body.message === "Unsupported media type", "Unexpected error body");
+    });
+%}
+
+### Missing content type
+POST {{baseUrl}}/links
+
+{"url":"https://example.com"}
+
+> {%
+    client.test("Missing content type is rejected", function () {
+        client.assert(response.status === 415, "Expected 415");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(Object.keys(JSON.parse(JSON.stringify(response.body))).sort().join() === "code,message", "Unexpected error fields");
+        client.assert(response.body.code === "unsupported_media_type" && response.body.message === "Unsupported media type", "Unexpected error body");
+    });
+%}
+
+### URL exceeding the domain limit (8001 ASCII bytes, below the HTTP body limit)
+< {%
+    request.variables.set("overlongURLBody", JSON.stringify({url: "https://example.com/" + "a".repeat(8001 - "https://example.com/".length)}));
+%}
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{{overlongURLBody}}
+
+> {%
+    client.test("URL byte limit is enforced", function () {
+        client.assert(response.status === 400, "Expected 400");
+        client.assert(response.body.code === "invalid_request" && response.body.message === "Invalid request", "Unexpected error body");
+    });
+%}
+
+### Body exceeding the default HTTP_MAX_BODY_BYTES=1048576
+< {%
+    request.variables.set("oversizedBody", JSON.stringify({url: "https://example.com/" + "a".repeat(1048576)}));
+%}
+POST {{baseUrl}}/links
+Content-Type: application/json
+
+{{oversizedBody}}
+
+> {%
+    client.test("HTTP body limit is enforced", function () {
+        client.assert(response.status === 413, "Expected 413");
+        client.assert(response.contentType.mimeType === "application/json", "Expected JSON");
+        client.assert(response.body.code === "payload_too_large" && response.body.message === "Payload too large", "Unexpected error body");
+    });
+%}
+
+### Unsupported method uses the standard ServeMux response
+DELETE {{baseUrl}}/links/{{e2eCode}}
+
+> {%
+    client.test("Unsupported method returns 405 and Allow", function () {
+        client.assert(response.status === 405, "Expected 405");
+        const allowed = (response.headers.valueOf("Allow") || "").split(/,\s*/);
+        client.assert(allowed.includes("GET"), "GET is missing from Allow");
+    });
+%}
+
+### Unknown route uses the standard ServeMux response
+GET {{baseUrl}}/e2e-unknown-route
+
+> {%
+    client.test("Unknown route returns 404", function () {
+        client.assert(response.status === 404, "Expected 404");
+    });
+%}
+
+### Rejected requests must not damage the original association
+GET {{baseUrl}}/links/{{e2eCode}}
+
+> {%
+    client.test("Original link is still available", function () {
+        client.assert(response.status === 200, "Expected 200");
+        client.assert(response.body.url === client.global.get("e2eOriginal"), "Stored association changed");
+    });
+%}

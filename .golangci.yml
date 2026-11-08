@@ -7,16 +7,37 @@ run:
 linters:
   default: none
   enable:
+    - bidichk
     - bodyclose
     - durationcheck
     - errcheck
+    - errorlint
+    - gocheckcompilerdirectives
     - gosec
     - govet
     - ineffassign
+    - loggercheck
     - nilerr
+    - nolintlint
+    - sloglint
     - staticcheck
+    - thelper
     - unused
+    - usetesting
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
 
 formatters:
   enable:
-    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: ozon-test-task
+    goimports:
+      local-prefixes:
+        - ozon-test-task
+  exclusions:
+    generated: strict

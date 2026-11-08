@@ -18,11 +18,11 @@ import (
 	"ozon-test-task/internal/shortener/ports"
 )
 
-func testPool(t testing.TB) *pgxpool.Pool {
-	t.Helper()
+func testPool(tb testing.TB) *pgxpool.Pool {
+	tb.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+		tb.Skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -30,55 +30,55 @@ func testPool(t testing.TB) *pgxpool.Pool {
 
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		t.Fatal("invalid test database configuration")
+		tb.Fatal("invalid test database configuration")
 	}
 
 	cfg.MaxConns = 8
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
-		t.Fatal("create test pool failed")
+		tb.Fatal("create test pool failed")
 	}
 
-	t.Cleanup(pool.Close)
+	tb.Cleanup(pool.Close)
 
 	if err := pool.Ping(ctx); err != nil {
-		t.Fatal("test database unavailable")
+		tb.Fatal("test database unavailable")
 	}
 	return pool
 }
 
-func testStorage(t testing.TB, pool *pgxpool.Pool) *Storage {
-	t.Helper()
+func testStorage(tb testing.TB, pool *pgxpool.Pool) *Storage {
+	tb.Helper()
 	s, err := NewStorage(pool, 5*time.Second)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return s
 }
 
-func testLink(t testing.TB, original, code string) domain.Link {
-	t.Helper()
+func testLink(tb testing.TB, original, code string) domain.Link {
+	tb.Helper()
 	u, err := domain.NewOriginalURL(original)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	c, err := domain.NewCode(code)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	l, err := domain.NewLink(u, c)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return l
 }
 
-func resetLinks(t testing.TB, pool *pgxpool.Pool) {
-	t.Helper()
+func resetLinks(tb testing.TB, pool *pgxpool.Pool) {
+	tb.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := pool.Exec(ctx, "TRUNCATE links"); err != nil {
-		t.Fatal("truncate test links failed")
+		tb.Fatal("truncate test links failed")
 	}
 }
 

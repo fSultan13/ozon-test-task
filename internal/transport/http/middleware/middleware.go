@@ -61,7 +61,7 @@ func Wrap(next http.Handler, log *slog.Logger, maxBodyBytes int64) http.Handler 
 		started := time.Now()
 		defer func() {
 			if value := recover(); value != nil {
-				if value == http.ErrAbortHandler {
+				if value == http.ErrAbortHandler { //nolint:errorlint // net/http recognizes this exact panic sentinel, not wrapped errors.
 					panic(value)
 				}
 				log.ErrorContext(r.Context(), "request panic", "request_id", requestID, "stack", string(debug.Stack()))

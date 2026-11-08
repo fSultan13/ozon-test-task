@@ -8,10 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"syscall"
+
 	"ozon-test-task/internal/app"
 	"ozon-test-task/internal/platform/config"
 	"ozon-test-task/internal/platform/logger"
-	"syscall"
 )
 
 // @title URL Shortener API

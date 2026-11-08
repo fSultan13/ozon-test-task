@@ -3,6 +3,7 @@ package logger
 import (
 	"io"
 	"log/slog"
+
 	"ozon-test-task/internal/platform/config"
 )
 

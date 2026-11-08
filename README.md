@@ -89,6 +89,10 @@ db/query/shortener/              SQL-запросы для sqlc
 
 ```sh
 make check        # форматирование, vet, lint, race, checkptr, vuln, сборка
+make fmt          # форматирование gofumpt и goimports; sqlc-код исключён
+make fmt-check    # проверка форматирования без изменения файлов
+make lint         # статический анализ без изменения файлов
+make lint-fix     # автоматические исправления линтеров; проверить diff после запуска
 make fuzz         # fuzzing конфигурации
 make bench        # memory storage, валидация URL, генератор и middleware, время и аллокации
 make profile      # CPU/heap-профили middleware в bin/

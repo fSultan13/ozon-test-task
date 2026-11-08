@@ -1,6 +1,8 @@
-.PHONY: run build test test-docker vet fmt fmt-check lint vuln checkptr fuzz bench profile check swagger up-memory up-postgres down
+.PHONY: run build test test-docker vet fmt fmt-check lint lint-fix vuln checkptr fuzz bench profile check swagger up-memory up-postgres down
 
 DOCKER ?= docker
+# Build the pinned linter with the project's Go toolchain.
+LINT_CMD = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 
 run:
 	go run ./cmd/api -storage=memory
@@ -18,14 +20,16 @@ vet:
 	go vet ./...
 
 fmt:
-	gofmt -w cmd internal
+	$(LINT_CMD) fmt ./...
 
 fmt-check:
-	@test -z "$$(gofmt -l cmd internal)" || (gofmt -l cmd internal; exit 1)
+	$(LINT_CMD) fmt --diff ./...
 
-# Build the pinned linter with the project's Go toolchain.
 lint:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run
+	$(LINT_CMD) run
+
+lint-fix:
+	$(LINT_CMD) run --fix
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.4.0 ./...

@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestHealth(t *testing.T) {
-	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	for _, tt := range []struct {
 		path, method string
 		check        func(context.Context) error

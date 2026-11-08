@@ -12,44 +12,44 @@ import (
 	"ozon-test-task/internal/shortener/ports"
 )
 
-func testLink(t testing.TB, original, code string) domain.Link {
-	t.Helper()
+func testLink(tb testing.TB, original, code string) domain.Link {
+	tb.Helper()
 	u, err := domain.NewOriginalURL(original)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	c, err := domain.NewCode(code)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	l, err := domain.NewLink(u, c)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return l
 }
 
-func openStorage(t testing.TB, limit int) *Storage {
-	t.Helper()
+func openStorage(tb testing.TB, limit int) *Storage {
+	tb.Helper()
 	s, err := NewStorage(context.Background(), Options{MaxEntries: limit})
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		if err := s.Close(); err != nil {
-			t.Error(err)
+			tb.Error(err)
 		}
 	})
 	return s
 }
 
-func assertLink(t testing.TB, s *Storage, l domain.Link) {
-	t.Helper()
+func assertLink(tb testing.TB, s *Storage, l domain.Link) {
+	tb.Helper()
 	if got, err := s.FindByCode(context.Background(), l.Code()); err != nil || got != l {
-		t.Errorf("find code = %v, %v", got, err)
+		tb.Errorf("find code = %v, %v", got, err)
 	}
 	if got, err := s.FindByOriginal(context.Background(), l.OriginalURL()); err != nil || got != l {
-		t.Errorf("find original = %v, %v", got, err)
+		tb.Errorf("find original = %v, %v", got, err)
 	}
 }
 

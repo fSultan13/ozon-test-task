@@ -35,7 +35,7 @@ func TestWrap(t *testing.T) {
 }
 
 func TestRecovery(t *testing.T) {
-	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	w := httptest.NewRecorder()
 	Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("sensitive failure") }), log, 1024).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	if w.Code != 500 || strings.Contains(w.Body.String(), "sensitive") {
@@ -45,16 +45,16 @@ func TestRecovery(t *testing.T) {
 
 func TestRecoveryAfterWriteAborts(t *testing.T) {
 	defer func() {
-		if v := recover(); v != http.ErrAbortHandler {
+		if v := recover(); v != http.ErrAbortHandler { //nolint:errorlint // Assert the exact panic sentinel required by net/http.
 			t.Fatalf("panic = %v", v)
 		}
 	}()
-	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("started")); panic("failed") }), log, 1024).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 }
 
 func TestBodyLimit(t *testing.T) {
-	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	Wrap(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		_, err := io.ReadAll(r.Body)
 		var limitErr *http.MaxBytesError
@@ -65,7 +65,7 @@ func TestBodyLimit(t *testing.T) {
 }
 
 func BenchmarkWrap(b *testing.B) {
-	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), log, 1024)
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {

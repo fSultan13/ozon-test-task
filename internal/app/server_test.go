@@ -100,7 +100,7 @@ func startTestServer(t *testing.T, handler http.Handler, shutdownTimeout time.Du
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 
-	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	server := newHTTPServer(config.HTTP{
 		ReadHeaderTimeout: testTimeout,
 		ReadTimeout:       testTimeout,

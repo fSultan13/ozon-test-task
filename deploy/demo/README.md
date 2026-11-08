@@ -1,55 +1,37 @@
 # Тестовые стенды
 
-На VPS `168.113.172.116` работает отдельный Compose-проект `ozon-shortener-demo`:
+VPS `168.113.172.116`, Compose-проект `ozon-shortener-demo`, каталог `/opt/ozon-shortener-demo`.
 
-| Режим      | API                          | Swagger UI                            |
+| Хранилище  | API                          | Swagger UI                            |
 |------------|------------------------------|---------------------------------------|
 | Memory     | http://168.113.172.116:18080 | http://168.113.172.116:18080/swagger/ |
 | PostgreSQL | http://168.113.172.116:18081 | http://168.113.172.116:18081/swagger/ |
 
-Readiness — `/readyz` на каждом порту. Файлы стенда: `/opt/ozon-shortener-demo`.
+Readiness — `/readyz`. Swagger UI включён в gateway; версия и SHA-256 закреплены в `images.env`.
 
 ## CI/CD через GitHub Actions
 
-Однократная настройка:
+1. Публичные Docker Hub репозитории: `fsultan13/ozon-url-shortener` и `fsultan13/ozon-url-shortener-gateway`.
+2. GitHub Environment `demo`: разрешить `master`, добавить `DOCKERHUB_TOKEN` (Read/Write)
+   и `DEPLOY_SSH_KEY` из `~/.ssh/id_ed25519_ozon_demo_actions`.
+3. После обновления `master`: **Actions → Deploy demo → Run workflow**.
 
-1. Создайте публичный Docker Hub репозиторий `fsultan13/ozon-url-shortener-gateway`. Репозиторий
-   `fsultan13/ozon-url-shortener` также должен быть публичным.
-2. Создайте Docker Hub token для `fsultan13` с правами Read/Write.
-3. В GitHub **Settings → Environments** создайте `demo`, разрешите deployments из `master`
-   и добавьте секреты:
-    - `DOCKERHUB_TOKEN` — токен Docker Hub;
-    - `DEPLOY_SSH_KEY` — содержимое локального файла `~/.ssh/id_ed25519_ozon_demo_actions`.
+Push/PR запускают только проверки. Размещение: CI → образы по digest → backup БД → миграции → обновление → проверка
+API/Swagger. Тег `latest` не обновляется. SSH-ключ даёт root-доступ; ключ и пароль БД (`deploy/demo/.env` на VPS) не
+добавлять в Git.
 
-Публичная часть отдельного CI-ключа уже добавлена на VPS. Ключ даёт доступ root; приватный ключ и пароль PostgreSQL
-нельзя добавлять в Git. Пароль БД остаётся на VPS в `deploy/demo/.env`.
+## Данные и откат
 
-После загрузки изменений в `master` запустите **Actions → Deploy demo → Run workflow**. Push и pull request запускают
-только проверки, без размещения.
-
-Pipeline: CI → публикация образов в Docker Hub → загрузка по digest на VPS → backup БД → миграции и обновление
-контейнеров → проверка API и Swagger. Тег `latest` не обновляется.
-
-Swagger UI скачивается при сборке из официального npm-пакета `swagger-ui-dist`;
-версия и SHA-256 закреплены в `images.env`. Образ `docker.swagger.io` не используется.
-Готовые файлы UI включены в gateway: браузеру доступ к npm не нужен.
-
-## Данные и ошибки обновления
-
-- Memory ограничена 10 000 ссылок и очищается при перезапуске API.
-- PostgreSQL хранит данные в постоянном томе. Не используйте `docker compose down -v`.
-- При ошибке запуска или серверной проверки скрипт пытается вернуть предыдущие API и gateway. Миграции автоматически не
-  откатываются: они должны быть совместимы с предыдущей версией приложения.
-- Ошибка финальной внешней проверки помечает workflow как неуспешный, но оставляет работающий релиз на VPS.
-- Резервные копии находятся в `backups/`, версии — в `releases/`. Они автоматически не удаляются; при нехватке
-  свободного места обновление останавливается до миграций.
+- Memory: 10 000 ссылок, очищается при рестарте. PostgreSQL: постоянный том; `down -v` удаляет данные.
+- При ошибке запуска/серверной проверки скрипт пытается вернуть API/gateway. Миграции не откатываются и должны быть
+  совместимы с предыдущим релизом.
+- Ошибка финальной внешней проверки оставляет релиз работающим, workflow — неуспешным.
+- `backups/` и `releases/` не очищаются автоматически; нехватка диска останавливает обновление до миграций.
 
 ## Проверки
 
-`make test-demo` проверяет оба стенда в отдельном локальном Docker-проекте.
-`make test-deploy` проверяет ошибки размещения и откат с заглушкой Docker.
-
-Проверка работающих стендов создаёт по одной тестовой ссылке в каждом хранилище:
+`make test-demo` — локальные стенды; `make test-deploy` — ошибки размещения и откат с заглушкой Docker. Проверка VPS
+создаёт по одной ссылке в каждом хранилище:
 
 ```sh
 python3 scripts/check-demo.py --memory http://168.113.172.116:18080 --postgres http://168.113.172.116:18081

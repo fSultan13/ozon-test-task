@@ -107,7 +107,8 @@ services:
       context: ../..
       dockerfile: deploy/demo/Dockerfile.gateway
       args:
-        SWAGGER_IMAGE: ${SWAGGER_IMAGE:?Set SWAGGER_IMAGE}
+        SWAGGER_UI_VERSION: ${SWAGGER_UI_VERSION:?Set SWAGGER_UI_VERSION}
+        SWAGGER_UI_SHA256: ${SWAGGER_UI_SHA256:?Set SWAGGER_UI_SHA256}
         NGINX_IMAGE: ${NGINX_IMAGE:?Set NGINX_IMAGE}
     mem_limit: 192m
     cpus: 0.25

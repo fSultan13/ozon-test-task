@@ -1,9 +1,14 @@
 # syntax=docker/dockerfile:1
-ARG SWAGGER_IMAGE
 ARG NGINX_IMAGE
-FROM --platform=$BUILDPLATFORM ${SWAGGER_IMAGE} AS swagger
+FROM ${NGINX_IMAGE} AS swagger
+ARG SWAGGER_UI_VERSION
+ARG SWAGGER_UI_SHA256
+# Use the official static distribution without pulling the Swagger Docker image.
+ADD --checksum=sha256:${SWAGGER_UI_SHA256} https://registry.npmjs.org/swagger-ui-dist/-/swagger-ui-dist-${SWAGGER_UI_VERSION}.tgz /tmp/swagger-ui.tgz
+RUN mkdir -p /opt/swagger \
+    && tar -xzf /tmp/swagger-ui.tgz -C /opt/swagger --strip-components=1
 FROM ${NGINX_IMAGE}
-COPY --from=swagger /usr/share/nginx/html/ /usr/share/nginx/html/swagger/
+COPY --from=swagger /opt/swagger/ /usr/share/nginx/html/swagger/
 COPY docs/swagger/swagger.json /usr/share/nginx/html/swagger/swagger.json
 COPY deploy/demo/swagger-initializer.js /usr/share/nginx/html/swagger/swagger-initializer.js
 COPY deploy/demo/nginx.conf /etc/nginx/nginx.conf

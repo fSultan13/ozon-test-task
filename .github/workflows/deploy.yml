@@ -61,7 +61,8 @@ jobs:
             --tag "$API_REPOSITORY:$RELEASE" .
           docker buildx build --platform linux/amd64 --push \
             --metadata-file /tmp/gateway-metadata.json \
-            --build-arg "SWAGGER_IMAGE=$SWAGGER_IMAGE" \
+            --build-arg "SWAGGER_UI_VERSION=$SWAGGER_UI_VERSION" \
+            --build-arg "SWAGGER_UI_SHA256=$SWAGGER_UI_SHA256" \
             --build-arg "NGINX_IMAGE=$NGINX_IMAGE" \
             --file deploy/demo/Dockerfile.gateway \
             --tag "$GATEWAY_REPOSITORY:$RELEASE" .

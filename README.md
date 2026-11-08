@@ -1,5 +1,21 @@
 # URL Shortener
 
+## Тестовые стенды
+
+Для удобного тестирования проект развёрнут на двух стендах — с хранением в памяти и в PostgreSQL.
+API и Swagger UI доступны по следующим адресам:
+
+| Режим      | API / `PUBLIC_BASE_URL`             | Swagger UI                                          | Readiness                                        |
+|------------|-------------------------------------|-----------------------------------------------------|--------------------------------------------------|
+| Memory     | [168.113.172.116:18080](http://168.113.172.116:18080) | [Swagger UI](http://168.113.172.116:18080/swagger/) | [Readiness](http://168.113.172.116:18080/readyz) |
+| PostgreSQL | [168.113.172.116:18081](http://168.113.172.116:18081) | [Swagger UI](http://168.113.172.116:18081/swagger/) | [Readiness](http://168.113.172.116:18081/readyz) |
+
+Swagger UI предназначен для отправки запросов к соответствующему API прямо из браузера. Данные memory-стенда теряются
+при перезапуске; данные PostgreSQL сохраняются в постоянном томе. Лимит memory-стенда — 10 000 ссылок.
+Конфигурация и команды управления описаны в [инструкции размещения](deploy/demo/README.md).
+Для обновления через Docker Hub предусмотрен GitHub Actions workflow **Deploy demo**, запускаемый вручную через
+**Run workflow** после настройки [секретов CI/CD](deploy/demo/README.md#cicd-через-github-actions).
+
 Go-сервис для [тестового задания](TASK.md). Реализованы домен, application, генератор кодов, memory- и PostgreSQL- и
 HTTP-адаптеры. Адаптер хранения выбирается в `app`. Доступны
 `GET /healthz` и `GET /readyz`; в режиме PostgreSQL readiness проверяет соединение с БД.
@@ -26,8 +42,8 @@ git switch feat/alternative-storage-with-rom
 
 ### Готовый образ из Docker Hub
 
-Публичный образ: [fsultan13/ozon-url-shortener](https://hub.docker.com/r/fsultan13/ozon-url-shortener).
-Поддерживает `linux/amd64` и `linux/arm64`; Docker выбирает архитектуру автоматически.
+Публичный образ: [fsultan13/ozon-url-shortener](https://hub.docker.com/r/fsultan13/ozon-url-shortener). Поддерживает
+`linux/amd64` и `linux/arm64`; Docker выбирает архитектуру автоматически.
 
 ```sh
 docker run --rm --name url-shortener \
@@ -36,8 +52,8 @@ docker run --rm --name url-shortener \
   fsultan13/ozon-url-shortener:latest -storage=memory
 ```
 
-Проверка: `curl http://localhost:8080/readyz`. Данные memory теряются при остановке контейнера.
-Для запуска готового образа через Compose из клонированного репозитория:
+Проверка: `curl http://localhost:8080/readyz`. Данные memory теряются при остановке контейнера. Для запуска готового
+образа через Compose из клонированного репозитория:
 
 Compose читает настройки из `.env`. Если файла ещё нет, скопируйте `.env.example` в `.env`.
 
@@ -201,6 +217,8 @@ make bench        # memory storage, валидация URL, генератор �
 make profile      # CPU/heap-профили middleware в bin/
 make profile-memory # CPU/heap-профили memory-адаптера в bin/
 make test-docker  # проверка двух Compose-профилей, readiness и миграций
+make test-demo    # оба стенда со Swagger, memory restart и сохранение PostgreSQL
+make test-deploy  # сценарии ошибок размещения и отката приложения (Docker CLI заменён тестовой заглушкой)
 make test-postgres # изолированная PostgreSQL 17: up/down/up, интеграционные тесты с race
 make bench-postgres # параллельные resolve/save-existing с настоящей БД
 make sqlc         # генерация SQL-кода, sqlc v1.30.0

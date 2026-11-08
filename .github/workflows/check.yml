@@ -3,6 +3,7 @@ name: Quality
 on:
   push:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -25,3 +26,5 @@ jobs:
       - run: make test-docker
         env:
           PUBLIC_BASE_URL: http://localhost:8080
+      - run: make test-demo
+      - run: make test-deploy

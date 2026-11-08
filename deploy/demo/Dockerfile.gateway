@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+ARG SWAGGER_IMAGE
+ARG NGINX_IMAGE
+FROM --platform=$BUILDPLATFORM ${SWAGGER_IMAGE} AS swagger
+FROM ${NGINX_IMAGE}
+COPY --from=swagger /usr/share/nginx/html/ /usr/share/nginx/html/swagger/
+COPY docs/swagger/swagger.json /usr/share/nginx/html/swagger/swagger.json
+COPY deploy/demo/swagger-initializer.js /usr/share/nginx/html/swagger/swagger-initializer.js
+COPY deploy/demo/nginx.conf /etc/nginx/nginx.conf
+COPY deploy/demo/proxy.conf /etc/nginx/demo-proxy.conf
+# Skip image entrypoint scripts: all configuration is baked into the image.
+ENTRYPOINT ["nginx", "-g", "daemon off;"]

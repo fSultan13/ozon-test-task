@@ -1,0 +1,134 @@
+name: Deploy demo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ozon-shortener-demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  branch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Allow deployments only from master
+        run: test "$GITHUB_REF" = refs/heads/master
+
+  quality:
+    needs: branch
+    uses: ./.github/workflows/check.yml
+
+  deploy:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: demo
+      url: http://168.113.172.116:18080/swagger/
+    env:
+      API_REPOSITORY: fsultan13/ozon-url-shortener
+      GATEWAY_REPOSITORY: fsultan13/ozon-url-shortener-gateway
+      DEPLOY_HOST: 168.113.172.116
+      DEPLOY_USER: root
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check credentials
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DOCKERHUB_TOKEN" || { echo 'Configure demo secret DOCKERHUB_TOKEN'; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo 'Configure demo secret DEPLOY_SSH_KEY'; exit 1; }
+      - name: Set release
+        run: echo "RELEASE=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: printf '%s' "$DOCKERHUB_TOKEN" | docker login --username fsultan13 --password-stdin
+      - name: Build and publish images
+        run: |
+          set -a
+          . deploy/demo/images.env
+          set +a
+          docker buildx build --platform linux/amd64 --push \
+            --metadata-file /tmp/api-metadata.json \
+            --tag "$API_REPOSITORY:$RELEASE" .
+          docker buildx build --platform linux/amd64 --push \
+            --metadata-file /tmp/gateway-metadata.json \
+            --build-arg "SWAGGER_IMAGE=$SWAGGER_IMAGE" \
+            --build-arg "NGINX_IMAGE=$NGINX_IMAGE" \
+            --file deploy/demo/Dockerfile.gateway \
+            --tag "$GATEWAY_REPOSITORY:$RELEASE" .
+      - name: Prepare release configuration
+        run: |
+          mkdir -p /tmp/demo-release
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          values = [f"RELEASE={os.environ['RELEASE']}"]
+          for name, metadata in [('API', 'api'), ('GATEWAY', 'gateway')]:
+              digest = json.loads(Path(f'/tmp/{metadata}-metadata.json').read_text())['containerimage.digest']
+              assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest)
+              values.append(f"{name}_IMAGE={os.environ[name + '_REPOSITORY']}@{digest}")
+          Path('/tmp/demo-release/release.env').write_text('\n'.join(values) + '\n')
+          PY
+          tar -czf /tmp/demo-release/config.tar.gz \
+            deploy/demo/compose.yml deploy/demo/images.env \
+            db/migrations scripts/check-demo.py
+          cp deploy/demo/deploy.sh /tmp/demo-release/deploy.sh
+          cd /tmp/demo-release
+          sha256sum release.env config.tar.gz deploy.sh > SHA256SUMS
+      - name: Save deployment manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/demo-release/
+          retention-days: 30
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/demo-key
+          chmod 600 ~/.ssh/demo-key
+          cp deploy/demo/known_hosts ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host demo
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/demo-key
+            IdentitiesOnly yes
+            BatchMode yes
+            StrictHostKeyChecking yes
+            ConnectTimeout 10
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+          EOF
+          chmod 600 ~/.ssh/config
+      - name: Deploy to VPS
+        run: |
+          remote_dir="/tmp/ozon-shortener-demo-$RELEASE"
+          ssh demo "umask 077; mkdir '$remote_dir'"
+          scp /tmp/demo-release/* "demo:$remote_dir/"
+          ssh demo "bash '$remote_dir/deploy.sh' '$RELEASE' '$remote_dir'"
+      - name: Verify public APIs and Swagger
+        run: python3 scripts/check-demo.py --memory http://168.113.172.116:18080 --postgres http://168.113.172.116:18081
+      - name: Deployment links
+        run: |
+          {
+            echo "Release: \`$RELEASE\`"
+            echo
+            echo '- [Memory Swagger](http://168.113.172.116:18080/swagger/)'
+            echo '- [PostgreSQL Swagger](http://168.113.172.116:18081/swagger/)'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove runner credentials
+        if: always()
+        run: |
+          docker logout
+          rm -f ~/.ssh/demo-key

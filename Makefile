@@ -16,6 +16,14 @@ test:
 test-docker:
 	DOCKER="$(DOCKER)" sh scripts/test-compose.sh
 
+.PHONY: test-demo
+test-demo:
+	DOCKER="$(DOCKER)" sh scripts/test-demo.sh
+
+.PHONY: test-deploy
+test-deploy:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/deployment -v
+
 vet:
 	go vet ./...
 

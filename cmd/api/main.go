@@ -17,7 +17,7 @@ import (
 
 // @title URL Shortener API
 // @version 0.1
-// @description Infrastructure scaffold. URL shortening is not implemented yet.
+// @description Create short URLs and resolve their codes to original URLs as JSON.
 // @BasePath /
 func main() {
 	if err := run(); err != nil {

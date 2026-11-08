@@ -56,7 +56,7 @@ profile-memory:
 check: fmt-check vet lint test checkptr vuln build
 
 swagger:
-	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g main.go -d cmd/api,internal/transport/http --parseInternal --output docs/swagger --outputTypes json,yaml
+	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g main.go -d cmd/api,internal/transport/http,internal/shortener/adapters/http --parseInternal --output docs/swagger --outputTypes json,yaml
 
 up-memory:
 	$(DOCKER) compose --profile memory up --build -d

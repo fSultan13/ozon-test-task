@@ -1,14 +1,14 @@
 # URL Shortener
 
-Go-сервис для [тестового задания](TASK.md). Реализованы домен, application, генератор кодов, memory- и
-PostgreSQL-адаптеры. HTTP API сокращения ссылок пока не реализовано. Адаптер хранения выбирается в `app`. Доступны
+Go-сервис для [тестового задания](TASK.md). Реализованы домен, application, генератор кодов, memory- и PostgreSQL- и
+HTTP-адаптеры. Адаптер хранения выбирается в `app`. Доступны
 `GET /healthz` и `GET /readyz`; в режиме PostgreSQL readiness проверяет соединение с БД.
 
 ## Альтернативная реализация хранения
 
 Ветка `feat/alternative-storage-with-rom` сохраняет вариант с файловой БД bbolt и ограниченным кешем в оперативной
-памяти. Она выделена для сравнения подходов: данные могут превышать размер ram и сохраняются после перезапуска,
-но чтение при промахе кеша и запись требуют обращения к файловой БД.
+памяти. Она выделена для сравнения подходов: данные могут превышать размер ram и сохраняются после перезапуска, но
+чтение при промахе кеша и запись требуют обращения к файловой БД.
 
 Этот вариант отличается от требуемого в задании самостоятельного хранилища в памяти приложения: хранение данных и
 транзакционную уникальность обеспечивает bbolt, самостоятельно реализованы адаптер и кеш. Он представлен как
@@ -25,6 +25,7 @@ git switch feat/alternative-storage-with-rom
 Нужен Go 1.27.3 или новее. Для контейнерного запуска — Docker с Compose v2.
 
 ```sh
+export PUBLIC_BASE_URL=http://localhost:8080
 go run ./cmd/api -storage=memory
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
@@ -33,16 +34,18 @@ curl http://localhost:8080/readyz
 Через Docker Compose:
 
 ```sh
+export PUBLIC_BASE_URL=http://localhost:8080
 make up-memory
 make down
 make up-postgres
 make down
 ```
 
-Профили запускаются по очереди: оба используют порт 8080. `make down` сохраняет том PostgreSQL;
-данные memory теряются при остановке процесса. Для внешней БД сначала примените миграции:
+Профили запускаются по очереди: оба используют порт 8080. `make down` сохраняет том PostgreSQL; данные memory теряются
+при остановке процесса. Для внешней БД сначала примените миграции:
 
 ```sh
+export PUBLIC_BASE_URL=http://localhost:8080
 export DATABASE_URL='postgres://user:password@localhost:5432/shortener?sslmode=disable'
 make migrate-up
 go run ./cmd/api -storage=postgres
@@ -50,6 +53,45 @@ go run ./cmd/api -storage=postgres
 
 Настройки описаны в [.env.example](.env.example). Приложение не загружает `.env` автоматически. Флаги `-storage` и
 `-http-addr` имеют приоритет над переменными окружения; `-h` выводит справку.
+
+## HTTP API
+
+Обязательная переменная `PUBLIC_BASE_URL` задаёт публичный HTTP (S)-адрес без credentials, query и fragment. Завершающие
+`/` удаляются. Host и proxy-заголовки запроса не используются для формирования ссылок. Если адрес содержит префикс пути
+(например, `https://short.example/api`), reverse proxy должен удалять
+`/api` перед передачей запроса приложению: внутренние маршруты остаются `/links` и `/links/{code}`.
+`SHORTENER_OPERATION_TIMEOUT` ограничивает сценарий для обоих хранилищ (по умолчанию `3s`).
+
+```sh
+curl -X POST http://localhost:8080/links \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+# 200 {"short_url":"http://localhost:8080/links/Abc123_Xyz"}
+curl http://localhost:8080/links/Abc123_Xyz
+# 200 {"url":"https://example.com"}
+```
+
+Повторный POST возвращает ту же ссылку с `200`. GET возвращает JSON, без редиректа. POST принимает ровно один
+JSON-объект с единственным строковым полем `url`; неизвестные и повторные поля, лишний JSON и невалидные URL
+отклоняются. Поддерживается `application/json` с параметрами, включая `charset`. Размер тела ограничен
+`HTTP_MAX_BODY_BYTES` (по умолчанию 1 MiB).
+
+Ошибки бизнес-обработчиков имеют формат `{"code":"invalid_request","message":"Invalid request"}`:
+
+| Статус | code                   | message                |
+|--------|------------------------|------------------------|
+| 400    | invalid_request        | Invalid request        |
+| 404    | not_found              | Link not found         |
+| 413    | payload_too_large      | Payload too large      |
+| 415    | unsupported_media_type | Unsupported media type |
+| 500    | internal_error         | Internal server error  |
+| 503    | service_unavailable    | Service unavailable    |
+| 504    | timeout                | Operation timed out    |
+
+`503` возвращается при заполнении memory-хранилища или исчерпании попыток генерации кода. Неожиданные ошибки
+зависимостей дают `500` без внутренних подробностей. Неизвестные маршруты и неподдерживаемые методы используют
+стандартные ответы ServeMux (`404` и `405`). Health-маршруты сохраняют прежний формат. Swagger:
+`docs/swagger/swagger.yaml` и `docs/swagger/swagger.json`; обновление — `make swagger`.
 
 ## Домен и генерация
 
@@ -78,6 +120,7 @@ internal/shortener/
   domain/                       сущности и инварианты
   ports/                        контракты хранения и генерации
   application/                  Shorten и Resolve
+  adapters/http/                JSON API сокращения и разрешения ссылок
   adapters/random/              генератор кодов
   adapters/memory/              два индекса в RAM, общий sync.RWMutex, лимит записей
   adapters/postgres/            адаптер Storage и сгенерированный sqlc-код
@@ -125,9 +168,9 @@ MEMORY_MAX_ENTRIES=100000 go run ./cmd/api -storage=memory
 - При остановке `Close` освобождает ссылки на данные и запрещает дальнейшие операции.
 
 `make bench` измеряет параллельный поиск по обоим индексам, повторное сохранение, смесь 95% чтений и 5% повторных
-сохранений, а также вставку пачки из 1000 новых связей восемью конкурентными работниками с чтением после вставки.
-Это микробенчмарки адаптера, а не оценка HTTP RPS или числа пользователей. Для дальнейшей оптимизации нужны
-согласованный профиль нагрузки, повторные замеры и CPU/heap-профили (`make profile-memory`).
+сохранений, а также вставку пачки из 1000 новых связей восемью конкурентными работниками с чтением после вставки. Это
+микробенчмарки адаптера, а не оценка HTTP RPS или числа пользователей. Для дальнейшей оптимизации нужны согласованный
+профиль нагрузки, повторные замеры и CPU/heap-профили (`make profile-memory`).
 
 ## PostgreSQL
 

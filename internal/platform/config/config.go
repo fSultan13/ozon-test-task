@@ -8,17 +8,22 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 )
 
 type Config struct {
-	Storage  string
-	HTTP     HTTP
-	Database Database
-	Memory   Memory
-	Log      Log
+	PublicBaseURL             string
+	ShortenerOperationTimeout time.Duration
+	Storage                   string
+	HTTP                      HTTP
+	Database                  Database
+	Memory                    Memory
+	Log                       Log
 }
 
 type HTTP struct {
@@ -70,6 +75,14 @@ func load(args []string, env envLookup) (Config, error) {
 	}
 
 	if err := applyFlags(args, &cfg); err != nil {
+		return Config{}, err
+	}
+	cfg.PublicBaseURL, err = parsePublicBaseURL(env.stringValue("PUBLIC_BASE_URL", ""))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ShortenerOperationTimeout, err = env.positiveDuration("SHORTENER_OPERATION_TIMEOUT", 3*time.Second)
+	if err != nil {
 		return Config{}, err
 	}
 	// Resolve flag precedence before reading any PostgreSQL configuration.
@@ -207,4 +220,17 @@ func validateHTTPAddr(addr string) error {
 	}
 
 	return nil
+}
+
+// parsePublicBaseURL never includes user input in configuration errors.
+func parsePublicBaseURL(raw string) (string, error) {
+	invalid := errors.New("PUBLIC_BASE_URL must be an absolute HTTP(S) URL without credentials, query or fragment")
+	parsed, err := url.Parse(raw)
+	if err != nil || strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return "", invalid
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || strings.ContainsAny(raw, "?#") {
+		return "", invalid
+	}
+	return strings.TrimRight(parsed.String(), "/"), nil
 }

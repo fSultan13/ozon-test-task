@@ -20,7 +20,11 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) (runErr error
 	// Keep the database available until HTTP shutdown has completed.
 	defer func() { runErr = errors.Join(runErr, resources.Close()) }()
 
-	router := httptransport.NewRouter(log, resources.Check, cfg.HTTP.MaxBodyBytes)
+	shortener, err := newShortenerHandler(cfg, resources.storage)
+	if err != nil {
+		return err
+	}
+	router := httptransport.NewRouter(log, resources.Check, cfg.HTTP.MaxBodyBytes, shortener.RegisterRoutes)
 	server := newHTTPServer(cfg.HTTP, router, log)
 
 	var listenConfig net.ListenConfig

@@ -46,7 +46,7 @@ func TestLoad(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := load(tt.args, func(key string) (string, bool) { v, ok := tt.env[key]; return v, ok })
+			cfg, err := loadTest(tt.args, func(key string) (string, bool) { v, ok := tt.env[key]; return v, ok })
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Load error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -73,7 +73,7 @@ func TestLoadEnvironmentAndFlagOverrides(t *testing.T) {
 		"LOG_LEVEL":                "debug",
 		"LOG_FORMAT":               "text",
 	}
-	cfg, err := load([]string{"-storage=memory", "-http-addr=127.0.0.1:9090"}, func(key string) (string, bool) {
+	cfg, err := loadTest([]string{"-storage=memory", "-http-addr=127.0.0.1:9090"}, func(key string) (string, bool) {
 		value, ok := env[key]
 		return value, ok
 	})
@@ -81,7 +81,9 @@ func TestLoadEnvironmentAndFlagOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Config{
-		Storage: "memory",
+		Storage:                   "memory",
+		PublicBaseURL:             "http://localhost:8080",
+		ShortenerOperationTimeout: 3 * time.Second,
 		HTTP: HTTP{
 			Addr:              "127.0.0.1:9090",
 			ReadHeaderTimeout: 2 * time.Second,
@@ -101,19 +103,19 @@ func TestLoadEnvironmentAndFlagOverrides(t *testing.T) {
 }
 
 func TestLoadHelp(t *testing.T) {
-	_, err := load([]string{"-h"}, func(string) (string, bool) { return "", false })
+	_, err := loadTest([]string{"-h"}, func(string) (string, bool) { return "", false })
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("error = %v, want flag.ErrHelp", err)
 	}
 }
 
 func FuzzLoad(f *testing.F) {
-	f.Add("memory", ":8080", "10s", "10")
-	f.Add("postgres", "invalid", "-1s", "2147483648")
-	f.Fuzz(func(t *testing.T, storage, addr, timeout, conns string) {
-		env := map[string]string{"STORAGE": storage, "HTTP_ADDR": addr, "HTTP_READ_TIMEOUT": timeout, "DATABASE_MAX_CONNS": conns, "MEMORY_MAX_ENTRIES": conns}
+	f.Add("memory", ":8080", "10s", "10", "http://localhost:8080", "3s")
+	f.Add("postgres", "invalid", "-1s", "2147483648", "bad", "0s")
+	f.Fuzz(func(t *testing.T, storage, addr, timeout, conns, publicURL, operationTimeout string) {
+		env := map[string]string{"PUBLIC_BASE_URL": publicURL, "SHORTENER_OPERATION_TIMEOUT": operationTimeout, "STORAGE": storage, "HTTP_ADDR": addr, "HTTP_READ_TIMEOUT": timeout, "DATABASE_MAX_CONNS": conns, "MEMORY_MAX_ENTRIES": conns}
 		cfg, err := load(nil, func(key string) (string, bool) { v, ok := env[key]; return v, ok })
-		if err == nil && (cfg.HTTP.ReadTimeout <= 0 || cfg.Database != (Database{}) || cfg.Storage != "memory") {
+		if err == nil && (cfg.HTTP.ReadTimeout <= 0 || cfg.ShortenerOperationTimeout <= 0 || cfg.PublicBaseURL == "" || cfg.Database != (Database{}) || cfg.Storage != "memory") {
 			t.Fatal("invalid configuration accepted")
 		}
 	})
@@ -121,7 +123,7 @@ func FuzzLoad(f *testing.F) {
 
 func TestMemoryDoesNotReadDatabaseConfiguration(t *testing.T) {
 	for _, args := range [][]string{nil, {"-storage=memory"}} {
-		cfg, err := load(args, func(key string) (string, bool) {
+		cfg, err := loadTest(args, func(key string) (string, bool) {
 			if key == "STORAGE" && args != nil {
 				return "postgres", true
 			}
@@ -140,7 +142,7 @@ func TestMemoryDoesNotReadDatabaseConfiguration(t *testing.T) {
 }
 
 func TestPostgresFlagLoadsDatabaseConfiguration(t *testing.T) {
-	cfg, err := load([]string{"-storage=postgres"}, func(key string) (string, bool) {
+	cfg, err := loadTest([]string{"-storage=postgres"}, func(key string) (string, bool) {
 		values := map[string]string{"STORAGE": "memory", "DATABASE_URL": "postgres://localhost/test", "DATABASE_MAX_CONNS": "25"}
 		v, ok := values[key]
 		return v, ok

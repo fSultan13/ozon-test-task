@@ -14,7 +14,7 @@ func TestMemoryConfiguration(t *testing.T) {
 		{"MEMORY_MAX_ENTRIES", "1", false},
 	} {
 		t.Run(tt.key+tt.value, func(t *testing.T) {
-			_, err := load([]string{"-storage=memory"}, func(key string) (string, bool) {
+			_, err := loadTest([]string{"-storage=memory"}, func(key string) (string, bool) {
 				if key == tt.key {
 					return tt.value, true
 				}
@@ -25,7 +25,7 @@ func TestMemoryConfiguration(t *testing.T) {
 			}
 		})
 	}
-	cfg, err := load([]string{"-storage=memory"}, func(key string) (string, bool) {
+	cfg, err := loadTest([]string{"-storage=memory"}, func(key string) (string, bool) {
 		if key == "STORAGE" {
 			return "postgres", true
 		}

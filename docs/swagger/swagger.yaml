@@ -1,7 +1,39 @@
 basePath: /
+definitions:
+  http.ErrorResponse:
+    properties:
+      code:
+        example: invalid_request
+        type: string
+      message:
+        example: Invalid request
+        type: string
+    type: object
+  http.ResolveResponse:
+    properties:
+      url:
+        example: https://example.com
+        type: string
+    required:
+    - url
+    type: object
+  http.ShortenRequest:
+    properties:
+      url:
+        example: https://example.com
+        type: string
+    required:
+    - url
+    type: object
+  http.ShortenResponse:
+    properties:
+      short_url:
+        example: https://short.example/links/Abc123_Xyz
+        type: string
+    type: object
 info:
   contact: {}
-  description: Infrastructure scaffold. URL shortening is not implemented yet.
+  description: Create short URLs and resolve their codes to original URLs as JSON.
   title: URL Shortener API
   version: "0.1"
 paths:
@@ -17,6 +49,95 @@ paths:
               type: string
             type: object
       summary: Liveness
+  /links:
+    post:
+      consumes:
+      - application/json
+      description: Returns the same short URL with status 200 for repeated submissions.
+        The public address is configured by PUBLIC_BASE_URL.
+      parameters:
+      - description: Absolute HTTP(S) URL, at most 8000 bytes; only the url field
+          is accepted
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.ShortenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.ShortenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "504":
+          description: Gateway Timeout
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+      summary: Shorten a URL
+      tags:
+      - links
+  /links/{code}:
+    get:
+      description: Returns the exact stored original URL as JSON, without redirecting.
+      parameters:
+      - description: 'Short code: 1 to 10 ASCII letters, digits or underscores'
+        in: path
+        maxLength: 10
+        minLength: 1
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.ResolveResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "504":
+          description: Gateway Timeout
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+      summary: Resolve a short URL code
+      tags:
+      - links
   /readyz:
     get:
       produces:

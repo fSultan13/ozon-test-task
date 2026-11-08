@@ -1,7 +1,7 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "Infrastructure scaffold. URL shortening is not implemented yet.",
+        "description": "Create short URLs and resolve their codes to original URLs as JSON.",
         "title": "URL Shortener API",
         "contact": {},
         "version": "0.1"
@@ -22,6 +22,137 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/links": {
+            "post": {
+                "description": "Returns the same short URL with status 200 for repeated submissions. The public address is configured by PUBLIC_BASE_URL.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "links"
+                ],
+                "summary": "Shorten a URL",
+                "parameters": [
+                    {
+                        "description": "Absolute HTTP(S) URL, at most 8000 bytes; only the url field is accepted",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ShortenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.ShortenResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "Gateway Timeout",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/links/{code}": {
+            "get": {
+                "description": "Returns the exact stored original URL as JSON, without redirecting.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "links"
+                ],
+                "summary": "Resolve a short URL code",
+                "parameters": [
+                    {
+                        "maxLength": 10,
+                        "minLength": 1,
+                        "type": "string",
+                        "description": "Short code: 1 to 10 ASCII letters, digits or underscores",
+                        "name": "code",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.ResolveResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "Gateway Timeout",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     }
                 }
@@ -52,6 +183,54 @@
                             }
                         }
                     }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "http.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "invalid_request"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Invalid request"
+                }
+            }
+        },
+        "http.ResolveResponse": {
+            "type": "object",
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "example": "https://example.com"
+                }
+            }
+        },
+        "http.ShortenRequest": {
+            "type": "object",
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "example": "https://example.com"
+                }
+            }
+        },
+        "http.ShortenResponse": {
+            "type": "object",
+            "properties": {
+                "short_url": {
+                    "type": "string",
+                    "example": "https://short.example/links/Abc123_Xyz"
                 }
             }
         }

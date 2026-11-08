@@ -23,3 +23,5 @@ jobs:
       - run: make swagger
       - run: git diff --exit-code -- docs/swagger
       - run: make test-docker
+        env:
+          PUBLIC_BASE_URL: http://localhost:8080
